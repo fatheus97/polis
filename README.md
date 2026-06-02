@@ -92,6 +92,17 @@ py -m polis --base .polis-real run --real --architects 3 --constitution-court
 py -m polis --base .polis-real run --real --parallel 4 --decorrelate
 ```
 
+### Watch it live — the dashboard (optional extra)
+
+A local web control panel to *watch* runs walk the stage timeline (color-coded by branch),
+see treasury burn, and take light actions (submit feedback, fund the treasury, trigger a run).
+Built on FastAPI as an **optional extra** so the core stays stdlib-only:
+
+```powershell
+py -m pip install -e ".[dashboard]"
+py -m polis --base .polis-real dashboard      # opens http://127.0.0.1:8765
+```
+
 ## Roadmap
 
 - **Phase 0** ✅ — deterministic skeleton + stub agents.

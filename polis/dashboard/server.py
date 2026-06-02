@@ -1,0 +1,148 @@
+"""FastAPI app — the ONLY module that imports a third-party web framework.
+
+Thin layer: reads go through reader.* + data.* (no side effects, no build_government);
+writes/runs go through a single RunManager (serialized). Binds 127.0.0.1 by default.
+"""
+
+from __future__ import annotations
+
+import threading
+import webbrowser
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from . import data, reader
+from .runner import RunManager
+
+
+def _static_dir() -> Path:
+    return Path(__file__).resolve().parent / "static"
+
+
+class FeedbackIn(BaseModel):
+    text: str
+    by: str = "tester"
+    directives: dict | None = None
+
+
+class BudgetIn(BaseModel):
+    amount: float
+
+
+class RunIn(BaseModel):
+    real: bool = False
+    confirm: bool = False
+    feedback_id: str | None = None
+    max_revisions: int = 2
+    architects: int = 1
+    constitution_court: bool = False
+
+
+def create_app(base) -> FastAPI:
+    base = Path(base)
+    app = FastAPI(title="Polis Dashboard", docs_url="/api/docs")
+    rm = RunManager(base)
+    app.state.run_manager = rm
+    static = _static_dir()
+
+    def record_path() -> Path:
+        return base / "record.jsonl"
+
+    # --- reads (no side effects) -----------------------------------------
+    @app.get("/")
+    def index():
+        idx = static / "index.html"
+        if idx.exists():
+            return FileResponse(idx)
+        return JSONResponse({"error": "frontend not built"}, status_code=404)
+
+    @app.get("/api/overview")
+    def overview():
+        ov = data.overview(reader.read_record_events(record_path()))
+        ov["treasury"] = reader.read_treasury_snapshot(base)
+        ov["pending_feedback"] = len(reader.read_pending_feedback(base))
+        return ov
+
+    @app.get("/api/runs")
+    def runs():
+        return {"runs": data.run_list(reader.read_record_events(record_path()))}
+
+    @app.get("/api/runs/{run_id}")
+    def run_detail(run_id: str):
+        groups = data.group_by_run(reader.read_record_events(record_path()))
+        if run_id not in groups:
+            raise HTTPException(404, "run not found")
+        detail = data.run_detail(groups[run_id])
+        detail["ledger_spend"] = reader.read_treasury_snapshot(base)["per_run"].get(run_id)
+        return detail
+
+    @app.get("/api/events")
+    def events(tail: int = Query(100, ge=0, le=2000), since_ts: float | None = None):
+        evs = reader.read_record_events(record_path())
+        evs = [e for e in evs if (e.get("ts") or 0) > since_ts] if since_ts is not None \
+            else evs[-tail:]
+        for e in evs:
+            e["branch"] = data.event_branch(e)
+        return {"events": evs}
+
+    @app.get("/api/treasury")
+    def treasury():
+        return reader.read_treasury_snapshot(base)
+
+    @app.get("/api/feedback")
+    def feedback():
+        return {"pending": reader.read_pending_feedback(base)}
+
+    @app.get("/api/jobs")
+    def jobs():
+        return {"jobs": rm.jobs()}
+
+    @app.get("/api/jobs/{job_id}")
+    def job(job_id: str):
+        j = rm.job(job_id)
+        if not j:
+            raise HTTPException(404, "job not found")
+        return j
+
+    # --- actions ----------------------------------------------------------
+    @app.post("/api/feedback")
+    def post_feedback(body: FeedbackIn):
+        return rm.submit_feedback(body.text, by=body.by, directives=body.directives)
+
+    @app.post("/api/budget")
+    def post_budget(body: BudgetIn):
+        try:
+            return rm.appropriate(body.amount)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.post("/api/run")
+    def post_run(body: RunIn):
+        if body.real and not body.confirm:
+            raise HTTPException(400, "real runs require confirm=true (they cost money)")
+        opts = {"max_revisions": body.max_revisions, "architects": body.architects,
+                "constitution_court": body.constitution_court}
+        return rm.trigger_run(real=body.real, feedback_id=body.feedback_id, opts=opts)
+
+    if static.exists():
+        app.mount("/static", StaticFiles(directory=str(static)), name="static")
+    return app
+
+
+def serve(base, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True):
+    import uvicorn
+    app = create_app(base)
+    url = f"http://{host}:{port}/"
+    if open_browser:
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    print(f"Polis dashboard → {url}  (base: {Path(base).resolve()})")
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="warning")
+    except OSError as e:
+        print(f"Could not bind {host}:{port} ({e}). Try another --port.")
+        return 1
+    return 0

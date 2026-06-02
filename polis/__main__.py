@@ -83,7 +83,25 @@ def main(argv=None) -> int:
     sub.add_parser("runs", help="list completed runs")
     sub.add_parser("status", help="treasury + inbox + run summary")
 
+    pd = sub.add_parser("dashboard",
+                        help="serve the web control panel (needs the 'dashboard' extra)")
+    pd.add_argument("--host", default="127.0.0.1")
+    pd.add_argument("--port", type=int, default=8765)
+    pd.add_argument("--no-browser", action="store_true", help="don't auto-open a browser")
+
     args = p.parse_args(argv)
+
+    # The dashboard serves the web UI; it opens stores read-only and never needs a
+    # full Government (no git-init side effect). Lazy import so the core works without
+    # the optional FastAPI extra installed.
+    if args.cmd == "dashboard":
+        try:
+            from .dashboard.server import serve
+        except ImportError:
+            print("The dashboard needs extra deps:  py -m pip install 'polis[dashboard]'")
+            return 1
+        return serve(args.base, host=args.host, port=args.port,
+                     open_browser=not args.no_browser)
 
     config = None
     build_kwargs = {}
