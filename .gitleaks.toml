@@ -1,0 +1,19 @@
+title = "Polis gitleaks config"
+
+[extend]
+useDefault = true
+
+# Polis's whole point is detecting secrets in code, so several files deliberately
+# contain FAKE, well-known secret strings as fixtures (e.g. sk-deadbeefcafebabe1234,
+# password = "hunter2secret"). These are never real credentials — allowlist them so
+# gitleaks doesn't flag the project's own test material. Real secrets elsewhere are
+# still caught.
+[allowlist]
+description = "Deliberately fake secrets used as fixtures for the Constitution's secret-detection rules."
+paths = [
+  '''polis/agents/stubs\.py''',
+  '''polis/constitution\.py''',
+  '''config/constitution\.json''',
+  '''docs/PRD\.md''',
+  '''tests/.*\.py''',
+]
