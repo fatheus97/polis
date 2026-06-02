@@ -1,0 +1,79 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      # Inert until a CLAUDE_CODE_OAUTH_TOKEN secret is set (generate via
+      # `claude setup-token`). Without it, the job passes and does nothing.
+      - name: Gate on review token
+        id: gate
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "CLAUDE_CODE_OAUTH_TOKEN not set — skipping AI review."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          fetch-depth: 1
+
+      # Pinned by SHA to v1.0.112 (a known-good release): the floating `v1` tag
+      # was advanced to a build whose native installer is broken
+      # (anthropics/claude-code-action#1254). Bump once that is resolved upstream.
+      - uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            CI already runs the unittest suite and gitleaks — do NOT re-check those.
+
+            Review priorities, in order:
+            1. Correctness & edge cases — does the change do what its description claims? What
+               breaks on the unhappy path (budget exhaustion, LLM/API errors, merge conflicts,
+               empty diffs, revision limits)?
+            2. Separation-of-powers invariants (see CLAUDE.md): the orchestrator stays
+               deterministic; branches never reference each other (independence); hard gates
+               (tests + constitution scan) override lenient models; ANTHROPIC_API_KEY stays
+               scrubbed from the claude subprocess.
+            3. Backward-compatibility — new features must default to prior-phase behavior; flag
+               any changed default.
+            4. Thread-safety — shared state (Treasury/RunStore/Record/Registry) must stay safe
+               under `--parallel`; the inbox is main-thread-only.
+            5. Design smells — premature abstraction, dead code, hidden behavior, broken
+               budget/record accounting, untested new behavior.
+
+            Skip trivia (whitespace, obvious typos). Be direct and specific — quote file:line.
+            Staff-engineer tone: if something is a production risk, say so.
+
+            REVIEW-ONLY MODE — hard rules:
+            - You are a reviewer, not an implementer. Do NOT write, edit, stage, commit, push,
+              or rebase code. You have no write access; any such attempt will fail and pollute
+              the review.
+            - Do NOT claim to have made commits/fixes/pushes, and do NOT reference or invent
+              commit SHAs. If a fix is needed, describe it in prose with the exact file:line and
+              the snippet to apply, and let the human author commit it.
+            - Do NOT include "Fix this →" links or any call-to-action that triggers a follow-up
+              agent. Your output is feedback in PR comments, nothing else.
+
+            Post top-level feedback with `gh pr comment`. Use inline comments for specific issues.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
