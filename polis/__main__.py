@@ -65,6 +65,17 @@ def main(argv=None) -> int:
                     help="convene a panel of N architects that propose + vote (default 1)")
     pr.add_argument("--constitution-court", action="store_true",
                     help="vet each PRD against the constitution before implementation")
+    pr.add_argument("--parallel", type=int, default=1,
+                    help="run N pending PRDs concurrently on isolated git worktrees")
+    pr.add_argument("--architect-model", default=None)
+    pr.add_argument("--dev-model", default=None)
+    pr.add_argument("--review-model", default=None)
+    pr.add_argument("--decorrelate", action="store_true",
+                    help="put the reviewer on a different model than the dev "
+                         "(reduces shared blind spots; claude CLI is Claude-only, so this "
+                         "is cross-tier, not cross-provider)")
+    pr.add_argument("--deploy", default=None,
+                    help="shell command to run against merged main after a successful merge")
 
     prec = sub.add_parser("record", help="read the audit log (the Record)")
     prec.add_argument("--tail", type=int, default=20)
@@ -81,11 +92,20 @@ def main(argv=None) -> int:
             max_revisions=args.max_revisions,
             num_architects=args.architects,
             constitutional_review=args.constitution_court,
+            deploy_command=args.deploy,
         )
         if args.real:
-            backend = ClaudeCliBackend(default_model=args.model or "sonnet")
             tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)
-                    if args.model else None)
+                    if args.model else ModelTier())
+            if args.architect_model:
+                tier.architect = args.architect_model
+            if args.dev_model:
+                tier.dev = args.dev_model
+            if args.review_model:
+                tier.reviewer = args.review_model
+            if args.decorrelate and tier.reviewer == tier.dev:
+                tier.reviewer = "opus" if tier.dev != "opus" else "sonnet"
+            backend = ClaudeCliBackend(default_model=args.model or "sonnet")
             build_kwargs.update(agents="real", backend=backend, tier=tier)
         build_kwargs["sandbox"] = (DockerSandbox() if args.sandbox == "docker"
                                    else LocalSandbox())
@@ -107,6 +127,15 @@ def main(argv=None) -> int:
         return 0
 
     if args.cmd == "run":
+        if args.parallel > 1:
+            items = gov.inbox.pending()
+            if not items:
+                print("Inbox empty — nothing to do.")
+                return 0
+            print(f"Running {len(items)} PRD(s) on up to {args.parallel} worktrees...")
+            for res in gov.run_parallel(items, max_workers=args.parallel):
+                print(_fmt_result(res))
+            return 0
         ran = 0
         while True:
             res = gov.run_next()

@@ -17,15 +17,27 @@ reviewer. Three cross-cutting mechanisms are the brakes on a fully autonomous sy
 
 See [`docs/PRD.md`](docs/PRD.md) for the full design.
 
-## Status: Phase 2 — specialization & deliberation
+## Status: Phase 3 — parallel legislature
 
-Real, model-backed officials drive a procedure that now includes legislative deliberation and
-review of the law itself:
+Real, model-backed officials run a procedure with legislative deliberation, review of the law,
+and **multiple PRDs in flight at once**:
 
 ```
-INTAKE → SPEC → [CONSTITUTIONAL] → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE) → DONE | ESCALATE
+INTAKE → SPEC → [CONSTITUTIONAL] → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE) → [DEPLOY] → DONE | ESCALATE
          (1 architect, or a panel that proposes + votes)
 ```
+
+**Phase 3 features (opt-in):**
+- **Parallel PRDs on git worktrees** — `run --parallel N` runs N pending PRDs concurrently,
+  each in its own isolated worktree; merges into `main` are serialized, and a branch that can't
+  apply cleanly raises a conflict that ESCALATES. Shared state (treasury/record/registry) is
+  thread-safe.
+- **Model decorrelation** — per-role models (`--architect-model/--dev-model/--review-model`) and
+  a `--decorrelate` convenience that puts the reviewer on a different model than the dev to
+  reduce shared blind spots. *(The `claude` CLI is Claude-only, so this is cross-tier, not
+  cross-provider; the `LLMBackend` seam is where a second provider would slot in.)*
+- **Deploy hooks** — `--deploy "<cmd>"` runs a command against merged `main` after a successful
+  merge; a deploy failure is recorded but never un-does the merge.
 
 **Phase 2 features (all opt-in; defaults = Phase 1):**
 - **Specialist hiring** — the architect tags each PRD with a `discipline`; the orchestrator
@@ -72,6 +84,9 @@ py -m polis --base .polis-real run --real        # add --sandbox docker to isola
 
 # Phase 2: a voting panel of architects + a constitutional court
 py -m polis --base .polis-real run --real --architects 3 --constitution-court
+
+# Phase 3: many PRDs at once on isolated worktrees, with a decorrelated reviewer
+py -m polis --base .polis-real run --real --parallel 4 --decorrelate
 ```
 
 ## Roadmap
@@ -80,4 +95,4 @@ py -m polis --base .polis-real run --real --architects 3 --constitution-court
 - **Phase 1** ✅ — real Architect / Dev (wraps Claude Code) / independent Reviewer; sequential;
   autonomous merge on `tests-green + approval`; Docker sandbox seam.
 - **Phase 2** ✅ — specialist dev hiring; multi-architect voting; constitutional review of PRDs.
-- **Phase 3** — parallel PRDs on worktrees; model decorrelation; deploy hooks.
+- **Phase 3** ✅ — parallel PRDs on git worktrees; model decorrelation; deploy hooks.

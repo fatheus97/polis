@@ -12,6 +12,7 @@ Append-only by design: events are facts that happened, never edited.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -22,6 +23,7 @@ class Record:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()  # serialize appends from parallel runs
 
     def append(
         self,
@@ -44,8 +46,9 @@ class Record:
             "cost": cost,
             "payload": to_jsonable(payload),
         }
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
+        with self._lock:
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(event) + "\n")
         return event
 
     def events(self) -> list[dict]:

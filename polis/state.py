@@ -8,6 +8,7 @@ replaying the log. Like the Treasury, it survives restarts.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -19,7 +20,8 @@ class RunStore:
         self.db_path = str(db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        self._lock = threading.Lock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS runs (
@@ -40,6 +42,10 @@ class RunStore:
         self.conn.commit()
 
     def save(self, res: RunResult, feedback: FeedbackItem) -> None:
+        with self._lock:
+            self._save(res, feedback)
+
+    def _save(self, res: RunResult, feedback: FeedbackItem) -> None:
         self.conn.execute(
             """
             INSERT INTO runs (run_id, feedback_id, feedback_text, outcome, last_stage,

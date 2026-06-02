@@ -14,15 +14,16 @@ from __future__ import annotations
 from ..models import Branch, Diff, FeedbackItem, FileChange, PRD, TestResult, Verdict
 from .base import Architect, ConstitutionalJudge, Dev, Reviewer
 
-_PASSING_TEST = (
-    "import unittest\n"
-    "import feature\n\n"
-    "class FeatureTest(unittest.TestCase):\n"
-    "    def test_feature_ok(self):\n"
-    '        self.assertEqual(feature.feature(), "ok")\n\n'
-    'if __name__ == "__main__":\n'
-    "    unittest.main()\n"
-)
+def _test_src(module: str) -> str:
+    return (
+        "import unittest\n"
+        f"from {module} import feature\n\n"
+        "class FeatureTest(unittest.TestCase):\n"
+        "    def test_feature_ok(self):\n"
+        '        self.assertEqual(feature(), "ok")\n\n'
+        'if __name__ == "__main__":\n'
+        "    unittest.main()\n"
+    )
 
 
 class StubArchitect(Architect):
@@ -72,10 +73,13 @@ class StubDev(Dev):
         fail_n = int(directives.get("n", 0)) if mode == "fail_n_times" else 0
         will_pass = not (mode == "fail_n_times" and attempt < fail_n)
         value = "ok" if will_pass else "todo"  # "todo" makes the bundled test fail
+        # A unique module name (via directive) lets parallel runs touch different
+        # files, so they merge cleanly instead of colliding on feature.py.
+        module = directives.get("module", "feature")
 
         changes = [
-            FileChange("feature.py", f'def feature():\n    return "{value}"\n'),
-            FileChange("test_feature.py", _PASSING_TEST),
+            FileChange(f"{module}.py", f'def feature():\n    return "{value}"\n'),
+            FileChange(f"test_{module}.py", _test_src(module)),
         ]
         if mode == "emit_secret":
             # Tests still pass, but this breaches the constitution — the judiciary

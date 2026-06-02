@@ -34,6 +34,9 @@ class FakeWorkspace:
     def changed_files(self):
         return list(self.fake_changes)
 
+    def deploy_dir(self):
+        return "."  # a valid cwd so a deploy hook can run in tests
+
     def start_change(self, branch):
         self.current = branch
         self.started.append(branch)

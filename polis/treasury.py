@@ -12,6 +12,7 @@ the same db sees the prior balance.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -25,7 +26,10 @@ class Treasury:
         self.db_path = str(db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        # Reentrant lock + cross-thread connection so parallel runs can share one
+        # treasury. debit() holds the lock across check+write so it never overdraws.
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.execute(
             """
             CREATE TABLE IF NOT EXISTS ledger (
@@ -50,22 +54,25 @@ class Treasury:
     def debit(self, actor: str, amount: float, reason: str, run_id: str | None = None) -> None:
         if amount < 0:
             raise ValueError("debit amount must be non-negative")
-        if self.balance() < amount:
-            raise InsufficientFunds(
-                f"{actor} needs {amount} but treasury holds {self.balance()}"
-            )
-        self._entry("debit", actor, -amount, reason, run_id)
+        with self._lock:
+            if self.balance() < amount:
+                raise InsufficientFunds(
+                    f"{actor} needs {amount} but treasury holds {self.balance()}"
+                )
+            self._entry("debit", actor, -amount, reason, run_id)
 
     def _entry(self, kind, actor, amount, reason, run_id):
-        self.conn.execute(
-            "INSERT INTO ledger (ts, kind, actor, amount, reason, run_id) VALUES (?,?,?,?,?,?)",
-            (time.time(), kind, actor, amount, reason, run_id),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO ledger (ts, kind, actor, amount, reason, run_id) VALUES (?,?,?,?,?,?)",
+                (time.time(), kind, actor, amount, reason, run_id),
+            )
+            self.conn.commit()
 
     # --- reads ----------------------------------------------------------
     def balance(self) -> float:
-        (total,) = self.conn.execute("SELECT COALESCE(SUM(amount), 0) FROM ledger").fetchone()
+        with self._lock:
+            (total,) = self.conn.execute("SELECT COALESCE(SUM(amount), 0) FROM ledger").fetchone()
         return float(total)
 
     def can_afford(self, amount: float) -> bool:
@@ -84,10 +91,11 @@ class Treasury:
         return float(t)
 
     def spent_on(self, run_id: str) -> float:
-        (t,) = self.conn.execute(
-            "SELECT COALESCE(-SUM(amount),0) FROM ledger WHERE kind='debit' AND run_id=?",
-            (run_id,),
-        ).fetchone()
+        with self._lock:
+            (t,) = self.conn.execute(
+                "SELECT COALESCE(-SUM(amount),0) FROM ledger WHERE kind='debit' AND run_id=?",
+                (run_id,),
+            ).fetchone()
         return float(t)
 
     def close(self) -> None:

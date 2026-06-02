@@ -17,6 +17,7 @@ Guarantees enforced here, by construction:
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass
 
 from .constitution import Constitution
@@ -27,7 +28,7 @@ from .registry import Registry
 from .sandbox import Sandbox
 from .state import RunStore
 from .treasury import Treasury
-from .workspace import Workspace
+from .workspace import MergeConflict, Workspace
 
 
 @dataclass
@@ -38,6 +39,7 @@ class OrchestratorConfig:
     constitutional_review: bool = False  # vet the PRD against the constitution first
     max_prd_revisions: int = 1      # bounded amend loop when a PRD is unconstitutional
     num_architects: int = 1         # >1 convenes a panel that proposes + votes on the PRD
+    deploy_command: str | None = None  # optional shell hook run after a successful merge
 
 
 class Orchestrator:
@@ -71,10 +73,22 @@ class Orchestrator:
             return False
         return True
 
+    def _deploy(self, command: str, ws, rec) -> None:
+        cwd = ws.deploy_dir() if hasattr(ws, "deploy_dir") else getattr(ws, "path", ".")
+        try:
+            proc = subprocess.run(command, shell=True, cwd=str(cwd),
+                                  capture_output=True, text=True, timeout=600)
+            ok = proc.returncode == 0
+            output = ((proc.stdout or "") + (proc.stderr or ""))[-500:]
+        except Exception as e:  # never let a deploy failure crash the run
+            ok, output = False, str(e)[:500]
+        rec(Stage.DONE, "procedure", "deploy", ok=ok, command=command, output=output)
+
     # --- main entry -----------------------------------------------------
-    def process(self, feedback: FeedbackItem) -> RunResult:
+    def process(self, feedback: FeedbackItem, workspace=None) -> RunResult:
         run_id = gen_id("run")
         cfg = self.config
+        ws = workspace or self.workspace  # per-run workspace (a worktree) when parallel
 
         def rec(stage, actor, kind, *, source=Branch.PROCEDURE, cost=0.0, **payload):
             self.record.append(run_id=run_id, stage=stage, actor=actor, kind=kind,
@@ -236,30 +250,30 @@ class Orchestrator:
                     return result(Stage.ESCALATE, Stage.IMPLEMENT,
                                   "budget_exhausted: cannot fund IMPLEMENT")
                 branch = f"polis/{run_id}/attempt-{attempt}"
-                self.workspace.start_change(branch)
+                ws.start_change(branch)
                 try:
                     diff = dev.implement(
                         prd, attempt=attempt,
                         review_feedback=(verdict.feedback if verdict else ""),
                         directives=feedback.directives,
-                        workspace=self.workspace,
+                        workspace=ws,
                     )
                 except LLMError as e:
-                    self.workspace.discard()
+                    ws.discard()
                     return result(Stage.ESCALATE, Stage.IMPLEMENT, f"llm_error: {e}")
-                self.workspace.apply(diff)
+                ws.apply(diff)
                 self.treasury.debit("executive:dev", dev.last_cost, "implement", run_id)
                 rec(Stage.IMPLEMENT, "executive:dev", "diff", cost=dev.last_cost, attempt=attempt,
                     branch=branch, files=[c.path for c in diff.changes], summary=diff.summary)
 
                 # VERIFY (procedure runs the sandbox; no LLM cost)
-                test_result = self.sandbox.run_tests(self.workspace)
+                test_result = self.sandbox.run_tests(ws)
                 rec(Stage.VERIFY, "procedure", "test_result", attempt=attempt,
                     passed=test_result.passed, summary=test_result.summary)
 
                 # REVIEW (judicial) — invoked ONLY here, by the procedure
                 if not self._afford(reviewer.cost, run_id):
-                    self.workspace.discard()
+                    ws.discard()
                     return result(Stage.ESCALATE, Stage.REVIEW,
                                   "budget_exhausted: cannot fund REVIEW")
                 try:
@@ -275,14 +289,22 @@ class Orchestrator:
 
                 # DECISION
                 if verdict.approved and test_result.passed:
-                    merge_commit = self.workspace.merge(
-                        f"Polis: merge {prd.id} (run {run_id}, attempt {attempt})")
+                    try:
+                        merge_commit = ws.merge(
+                            f"Polis: merge {prd.id} (run {run_id}, attempt {attempt})")
+                    except MergeConflict as e:
+                        ws.discard()
+                        return result(Stage.ESCALATE, Stage.MERGE, f"merge_conflict: {e}")
                     rec(Stage.MERGE, "procedure", "merge", prd_id=prd.id, commit=merge_commit)
+                    # Optional deploy hook — runs against merged main; a failure is
+                    # recorded but never un-does the merge that already landed.
+                    if cfg.deploy_command:
+                        self._deploy(cfg.deploy_command, ws, rec)
                     rec(Stage.DONE, "procedure", "done", commit=merge_commit)
                     return result(Stage.DONE, Stage.DONE, "merged")
 
                 # Rejected: discard the attempt and maybe revise.
-                self.workspace.discard()
+                ws.discard()
                 attempt += 1
                 if attempt > cfg.max_revisions:
                     return result(Stage.ESCALATE, Stage.REVISE,

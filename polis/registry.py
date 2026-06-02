@@ -8,6 +8,7 @@ three core roles; Phase 2 adds specialist dev templates here with no other chang
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Callable
 
@@ -50,6 +51,7 @@ class Registry:
     def __init__(self):
         self._templates: dict[str, RoleTemplate] = {}
         self._instances: dict[str, Agent] = {}
+        self._lock = threading.Lock()  # guards the instance pool across parallel runs
         # Builds a dev for a given discipline (None => generalist). Set by
         # default()/real(); enables specialist hiring without a fixed template per role.
         self._dev_factory = None
@@ -67,8 +69,9 @@ class Registry:
         if name not in self._templates:
             raise KeyError(f"no role template registered: {name!r}")
         agent = self._templates[name].factory()
-        agent.instance_id = gen_id("inst")
-        self._instances[agent.instance_id] = agent
+        with self._lock:
+            agent.instance_id = gen_id("inst")
+            self._instances[agent.instance_id] = agent
         return agent
 
     def hire_dev(self, discipline: str | None = None) -> Agent:
@@ -78,13 +81,15 @@ class Registry:
             agent = self._dev_factory(discipline)
         else:
             agent = self._templates["dev"].factory()
-        agent.instance_id = gen_id("inst")
-        self._instances[agent.instance_id] = agent
+        with self._lock:
+            agent.instance_id = gen_id("inst")
+            self._instances[agent.instance_id] = agent
         return agent
 
     def release(self, agent: Agent) -> None:
-        if agent.instance_id:
-            self._instances.pop(agent.instance_id, None)
+        with self._lock:
+            if agent.instance_id:
+                self._instances.pop(agent.instance_id, None)
 
     def live_instances(self) -> list[Agent]:
         return list(self._instances.values())

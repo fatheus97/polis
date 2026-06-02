@@ -14,6 +14,11 @@ from pathlib import Path
 from .models import Diff, FileChange
 
 
+class MergeConflict(Exception):
+    """Raised when a branch cannot be merged cleanly into main (parallel runs that
+    touched the same lines). The orchestrator turns this into an ESCALATE."""
+
+
 class Workspace:
     """Interface. The orchestrator only depends on these four methods + ``path``."""
 
@@ -24,10 +29,16 @@ class Workspace:
     def merge(self, message: str) -> str: ...
     def discard(self) -> None: ...
 
+    def deploy_dir(self) -> Path:
+        """Directory holding merged main, where a post-merge deploy hook runs."""
+        return Path(self.path)
+
 
 class GitWorkspace(Workspace):
     def __init__(self, path: str | Path, main_branch: str = "main"):
-        self.path = Path(path)
+        # Resolve to absolute: git worktree add interprets a relative path against
+        # the repo dir, not our cwd, so relative paths break worktrees on Windows.
+        self.path = Path(path).resolve()
         self.main_branch = main_branch
         self._current: str | None = None
         self._ensure_repo()
@@ -110,7 +121,10 @@ class GitWorkspace(Workspace):
             raise RuntimeError("merge() called with no active change branch")
         branch = self._current
         self._git("checkout", self.main_branch)
-        self._git("merge", "--no-ff", branch, "-m", message)
+        r = self._git("merge", "--no-ff", branch, "-m", message, check=False)
+        if r.returncode != 0:
+            self._git("merge", "--abort", check=False)
+            raise MergeConflict(branch)
         sha = self.head()
         self._git("branch", "-D", branch, check=False)
         self._current = None

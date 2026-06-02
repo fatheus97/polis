@@ -10,9 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
+
 from .constitution import Constitution, DEFAULT_PATH
 from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
+from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
 from .record import Record
 from .registry import ModelTier, Registry
@@ -20,6 +23,7 @@ from .sandbox import LocalSandbox, Sandbox
 from .state import RunStore
 from .treasury import Treasury
 from .workspace import GitWorkspace, Workspace
+from .worktree import WorktreeManager
 
 
 @dataclass
@@ -44,6 +48,34 @@ class Government:
         result = self.orchestrator.process(item)
         self.inbox.mark_processed(item.id, result.run_id)
         return result
+
+    def run_parallel(self, items, max_workers: int = 4) -> list[RunResult]:
+        """Run feedback items concurrently, each on its own git worktree. Shared state
+        (treasury/record/registry/run-store) is thread-safe; merges are serialized.
+        The inbox is touched only from this (main) thread, so it needs no locking."""
+        if not items:
+            return []
+        manager = WorktreeManager(self.base / "workspace",
+                                  work_root=self.base / "worktrees")
+
+        def run_one(item) -> RunResult:
+            ws = manager.create_worktree(item.id)
+            try:
+                return self.orchestrator.process(item, workspace=ws)
+            except Exception as e:  # never let one run kill the batch
+                return RunResult(run_id=gen_id("run"), outcome=Stage.ESCALATE,
+                                 last_stage=Stage.INTAKE, reason=f"error: {e}")
+            finally:
+                manager.remove_worktree(ws)
+
+        out: dict[str, RunResult] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(run_one, it): it for it in items}
+            for fut, it in futures.items():
+                out[it.id] = fut.result()
+        for it in items:  # mark processed on the main thread (inbox isn't shared)
+            self.inbox.mark_processed(it.id, out[it.id].run_id)
+        return [out[it.id] for it in items]
 
 
 def build_government(
