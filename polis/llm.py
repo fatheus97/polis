@@ -12,6 +12,7 @@ A FakeLLM is provided so the whole suite runs hermetically — no model calls, n
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -45,17 +46,34 @@ class ClaudeCliBackend(LLMBackend):
     _TRANSIENT_STATUS = {429, 500, 502, 503, 504, 529}
     _TRANSIENT_TEXT = ("overloaded", "rate limit", "try again", "timeout", "529", "503")
 
+    # Env vars that would route billing to an API key instead of the logged-in
+    # (e.g. Max) subscription. Scrubbed by default so we can NEVER spend someone
+    # else's key just because it happens to be in the environment.
+    _BILLING_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
     def __init__(self, binary: str = "claude", default_model: str = "sonnet",
                  timeout: int = 300, default_cwd: str | None = None,
-                 max_retries: int = 3, retry_base: float = 2.0):
+                 max_retries: int = 3, retry_base: float = 2.0,
+                 use_subscription: bool = True):
         self.binary = binary
         self.default_model = default_model
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_base = retry_base
+        # Force the CLI to use its logged-in subscription, not an ambient API key.
+        self.use_subscription = use_subscription
         # A neutral, throwaway directory so pure-reasoning agents (architect/reviewer)
         # never run in — and so cannot read or edit — the Polis repo itself.
         self.default_cwd = default_cwd or tempfile.mkdtemp(prefix="polis-llm-cwd-")
+
+    def _child_env(self) -> dict:
+        """Environment for the claude subprocess. By default the API-key/billing vars
+        are removed so the CLI authenticates with the logged-in subscription."""
+        env = os.environ.copy()
+        if self.use_subscription:
+            for key in self._BILLING_ENV:
+                env.pop(key, None)
+        return env
 
     @classmethod
     def _is_transient(cls, data: dict) -> bool:
@@ -84,6 +102,7 @@ class ClaudeCliBackend(LLMBackend):
                 proc = subprocess.run(
                     cmd, input=prompt, cwd=cwd or self.default_cwd,
                     capture_output=True, text=True, encoding="utf-8", timeout=self.timeout,
+                    env=self._child_env(),
                 )
             except subprocess.TimeoutExpired:
                 last_err = f"claude CLI timed out after {self.timeout}s"
