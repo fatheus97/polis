@@ -30,7 +30,7 @@ INTAKE → SPEC → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE→IMPLEM
 
 ```powershell
 # run the test suite (no dependencies required)
-py -m unittest discover -s tests -v
+py -m unittest discover -t . -s tests -v
 
 # drive the procedure end-to-end from the CLI
 py -m polis budget --appropriate 1000          # fund the treasury

@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "amendable_by": "sovereign",
+  "rules": [
+    {
+      "id": "no-hardcoded-secrets",
+      "description": "Never commit secrets or credentials into the codebase.",
+      "severity": "block",
+      "check": "regex",
+      "pattern": "(?i)(api[_-]?key|secret|password|passwd|access[_-]?token|auth[_-]?token)\\s*[:=]\\s*[\"'][^\"']{6,}[\"']|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-[A-Za-z0-9]{16,}"
+    },
+    {
+      "id": "no-eval-of-input",
+      "description": "Avoid eval()/exec() — they invite code-injection.",
+      "severity": "warn",
+      "check": "regex",
+      "pattern": "\\b(eval|exec)\\s*\\("
+    },
+    {
+      "id": "no-disable-security",
+      "description": "Do not disable TLS/cert verification.",
+      "severity": "block",
+      "check": "regex",
+      "pattern": "(?i)(verify\\s*=\\s*False|InsecureRequestWarning|NODE_TLS_REJECT_UNAUTHORIZED\\s*=\\s*[\"']?0)"
+    }
+  ]
+}
