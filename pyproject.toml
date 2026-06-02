@@ -3,6 +3,7 @@ name = "polis"
 version = "0.1.0"
 description = "A separation-of-powers multi-agent coding system."
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
 # Phase 0 is intentionally stdlib-only (sqlite3, json, argparse, unittest) so the
 # skeleton runs and tests pass with zero `pip install`. Real-LLM / coding-agent

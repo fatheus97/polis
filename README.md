@@ -96,3 +96,7 @@ py -m polis --base .polis-real run --real --parallel 4 --decorrelate
   autonomous merge on `tests-green + approval`; Docker sandbox seam.
 - **Phase 2** ✅ — specialist dev hiring; multi-architect voting; constitutional review of PRDs.
 - **Phase 3** ✅ — parallel PRDs on git worktrees; model decorrelation; deploy hooks.
+
+## License
+
+[MIT](LICENSE) © fatheus97
