@@ -3,4 +3,4 @@
 Phase 0: the deterministic procedure with stub agents. No real LLM calls.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
