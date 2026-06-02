@@ -1,0 +1,160 @@
+"""Hermetic tests for the real (LLM-backed) agents — driven by FakeLLM, no model
+calls, no cost. Covers JSON parsing, graceful degradation, the dev capturing
+workspace edits, and the reviewer's HARD GATES overriding a lenient model.
+"""
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from polis.agents.llm_agents import ClaudeCodeDev, LLMArchitect, LLMReviewer
+from polis.constitution import Constitution
+from polis.llm import FakeLLM, LLMError, LLMResponse
+from polis.models import Diff, FeedbackItem, FileChange, PRD, Stage, TestResult
+from polis.orchestrator import Orchestrator, OrchestratorConfig
+from polis.record import Record
+from polis.registry import Registry
+from polis.state import RunStore
+from polis.treasury import Treasury
+from tests._doubles import FakeWorkspace, ScriptedSandbox, passing
+
+PRD_JSON = ('{"title":"Health","goal":"add /health","acceptance_criteria":["returns ok"],'
+            '"constraints":[],"out_of_scope":[]}')
+
+
+class ArchitectTest(unittest.TestCase):
+    def test_parses_json_into_prd(self):
+        fake = FakeLLM([LLMResponse(text=PRD_JSON, cost_usd=0.12)])
+        arch = LLMArchitect(fake, model="sonnet")
+        prd = arch.write_prd(FeedbackItem(text="add health"))
+        self.assertEqual(prd.title, "Health")
+        self.assertEqual(prd.acceptance_criteria, ["returns ok"])
+        self.assertEqual(arch.last_cost, 0.12)
+        self.assertEqual(fake.calls[0]["model"], "sonnet")
+
+    def test_handles_fenced_json(self):
+        fake = FakeLLM(["here you go:\n```json\n" + PRD_JSON + "\n```"])
+        prd = LLMArchitect(fake).write_prd(FeedbackItem(text="x"))
+        self.assertEqual(prd.title, "Health")
+
+    def test_degrades_gracefully_on_non_json(self):
+        fake = FakeLLM(["sorry, no JSON here"])
+        prd = LLMArchitect(fake).write_prd(FeedbackItem(text="do the thing"))
+        self.assertIn("do the thing", prd.goal)  # fell back to feedback text
+
+
+class DevTest(unittest.TestCase):
+    def test_captures_workspace_edits_as_diff(self):
+        fake = FakeLLM([LLMResponse(text="implemented the feature", cost_usd=0.5)])
+        ws = FakeWorkspace()
+        ws.fake_changes = [FileChange("feature.py", "def f():\n    return 'ok'\n")]
+        dev = ClaudeCodeDev(fake, model="haiku")
+        diff = dev.implement(PRD(title="t", goal="g"), workspace=ws)
+        self.assertEqual([c.path for c in diff.changes], ["feature.py"])
+        self.assertEqual(dev.last_cost, 0.5)
+        # dev runs in the workspace, with edits auto-accepted
+        self.assertEqual(fake.calls[0]["permission_mode"], "acceptEdits")
+        self.assertEqual(fake.calls[0]["cwd"], ws.path)
+
+    def test_requires_a_workspace(self):
+        with self.assertRaises(ValueError):
+            ClaudeCodeDev(FakeLLM(["x"])).implement(PRD(title="t", goal="g"))
+
+
+class ReviewerHardGateTest(unittest.TestCase):
+    def setUp(self):
+        self.c = Constitution.load()
+        self.prd = PRD(title="t", goal="g")
+
+    def _review(self, approved_json, diff, test_result):
+        rev = LLMReviewer(FakeLLM([approved_json]))
+        return rev.review(self.prd, diff, test_result, self.c)
+
+    def test_lenient_llm_cannot_pass_failing_tests(self):
+        v = self._review('{"approved": true, "reasons": ["lgtm"]}',
+                         Diff(changes=[FileChange("a.py", "x = 1\n")]),
+                         TestResult(ran=True, passed=False, summary="fail"))
+        self.assertFalse(v.approved)
+        self.assertTrue(any("not green" in r.lower() for r in v.reasons))
+
+    def test_lenient_llm_cannot_pass_a_secret(self):
+        v = self._review('{"approved": true, "reasons": ["lgtm"]}',
+                         Diff(changes=[FileChange("config.py", 'API_KEY = "sk-deadbeefcafebabe1234"\n')]),
+                         TestResult(ran=True, passed=True))
+        self.assertFalse(v.approved)
+        self.assertIn("no-hardcoded-secrets", {x.rule_id for x in v.violations})
+
+    def test_clean_change_can_be_approved(self):
+        v = self._review('{"approved": true, "reasons": ["good"]}',
+                         Diff(changes=[FileChange("feature.py", "def f():\n    return 'ok'\n")]),
+                         TestResult(ran=True, passed=True))
+        self.assertTrue(v.approved)
+
+    def test_unparseable_review_defaults_to_reject(self):
+        v = self._review("not json", Diff(changes=[FileChange("a.py", "x=1\n")]),
+                         TestResult(ran=True, passed=True))
+        self.assertFalse(v.approved)
+
+
+class RealAgentsCostAccountingTest(unittest.TestCase):
+    """End-to-end through the orchestrator with FakeLLM agents: proves ACTUAL per-call
+    cost (not the estimate) is debited, and that the real agents satisfy the same
+    procedure + independence guarantees as the stubs."""
+
+    def test_actual_costs_are_debited_and_run_merges(self):
+        backend = FakeLLM([
+            LLMResponse(text=PRD_JSON, cost_usd=0.10),                                  # architect
+            LLMResponse(text="implemented", cost_usd=0.50),                             # dev
+            LLMResponse(text='{"approved": true, "reasons": ["ok"]}', cost_usd=0.20),   # reviewer
+        ])
+        treasury = Treasury(":memory:")
+        treasury.appropriate(100)
+        ws = FakeWorkspace()
+        ws.fake_changes = [FileChange("feature.py", "def f():\n    return 'ok'\n")]
+        tmp = Path(tempfile.mkdtemp(prefix="polis-real-"))
+        orch = Orchestrator(
+            registry=Registry.real(backend),
+            treasury=treasury,
+            record=Record(tmp / "record.jsonl"),
+            constitution=Constitution.load(),
+            workspace=ws,
+            sandbox=ScriptedSandbox([passing()]),
+            run_store=RunStore(":memory:"),
+            config=OrchestratorConfig(),
+        )
+        res = orch.process(FeedbackItem(text="add a feature"))
+        self.assertTrue(res.merged)
+        self.assertAlmostEqual(treasury.spent_on(res.run_id), 0.80, places=9)
+        # independence still holds with real agents
+        judicial = [e for e in Record(tmp / "record.jsonl").events()
+                    if e["actor"].startswith("judicial")]
+        self.assertTrue(judicial and all(e["source"] == "procedure" for e in judicial))
+
+    def test_infra_error_escalates_rather_than_rejecting(self):
+        # A transient API failure must ESCALATE (human attention), not be mistaken for
+        # a substantive rejection that burns revisions.
+        backend = FakeLLM([
+            LLMResponse(text=PRD_JSON, cost_usd=0.10),         # architect ok
+            LLMResponse(text="implemented", cost_usd=0.50),    # dev ok
+            LLMError("claude API error: Overloaded"),          # reviewer infra failure
+        ])
+        treasury = Treasury(":memory:")
+        treasury.appropriate(100)
+        ws = FakeWorkspace()
+        ws.fake_changes = [FileChange("feature.py", "x = 1\n")]
+        tmp = Path(tempfile.mkdtemp(prefix="polis-infra-"))
+        orch = Orchestrator(
+            registry=Registry.real(backend), treasury=treasury,
+            record=Record(tmp / "record.jsonl"), constitution=Constitution.load(),
+            workspace=ws, sandbox=ScriptedSandbox([passing()]),
+            run_store=RunStore(":memory:"), config=OrchestratorConfig(),
+        )
+        res = orch.process(FeedbackItem(text="x"))
+        self.assertEqual(res.outcome, Stage.ESCALATE)
+        self.assertEqual(res.last_stage, Stage.REVIEW)
+        self.assertIn("llm_error", res.reason)
+        self.assertEqual(len(ws.merges), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

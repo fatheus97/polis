@@ -8,6 +8,7 @@ venv/
 
 # Polis runtime state (local government data)
 .polis/
+.polis-*/
 *.sqlite
 *.sqlite3
 *.db

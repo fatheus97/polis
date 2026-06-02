@@ -55,7 +55,7 @@ class StubDev(Dev):
     def __init__(self, cost: float = 10.0):
         super().__init__("dev", Branch.EXECUTIVE, cost)
 
-    def implement(self, prd, attempt=0, review_feedback="", directives=None):
+    def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
         directives = directives or {}
         mode = directives.get("dev", "ok")
         fail_n = int(directives.get("n", 0)) if mode == "fail_n_times" else 0

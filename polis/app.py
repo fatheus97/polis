@@ -12,9 +12,10 @@ from pathlib import Path
 
 from .constitution import Constitution, DEFAULT_PATH
 from .feedback import FeedbackInbox
+from .llm import ClaudeCliBackend, LLMBackend
 from .orchestrator import Orchestrator, OrchestratorConfig
 from .record import Record
-from .registry import Registry
+from .registry import ModelTier, Registry
 from .sandbox import LocalSandbox, Sandbox
 from .state import RunStore
 from .treasury import Treasury
@@ -53,13 +54,20 @@ def build_government(
     config: OrchestratorConfig | None = None,
     workspace: Workspace | None = None,
     sandbox: Sandbox | None = None,
+    agents: str = "stub",            # "stub" (Phase 0) | "real" (Phase 1, LLM-backed)
+    backend: LLMBackend | None = None,
+    tier: ModelTier | None = None,
 ) -> Government:
     base = Path(base_dir)
     base.mkdir(parents=True, exist_ok=True)
     treasury = Treasury(base / "treasury.sqlite")
     record = Record(base / "record.jsonl")
     constitution = Constitution.load(constitution_path)
-    registry = Registry.default()
+    if agents == "real":
+        backend = backend or ClaudeCliBackend()
+        registry = Registry.real(backend, tier)
+    else:
+        registry = Registry.default()
     run_store = RunStore(base / "runs.sqlite")
     inbox = FeedbackInbox(base / "feedback.sqlite")
     workspace = workspace or GitWorkspace(workspace_dir or (base / "workspace"))

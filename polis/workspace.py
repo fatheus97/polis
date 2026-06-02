@@ -11,7 +11,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from .models import Diff
+from .models import Diff, FileChange
 
 
 class Workspace:
@@ -59,6 +59,34 @@ class GitWorkspace(Workspace):
 
     def head(self) -> str:
         return self._git("rev-parse", "HEAD").stdout.strip()
+
+    def changed_files(self) -> list[FileChange]:
+        """Snapshot uncommitted working-tree changes as whole-file writes.
+
+        Used by a real coding-agent dev that edits files in place: it runs, then we
+        capture what it changed for the reviewer + constitution to inspect.
+        Deletions and binary/unreadable files are skipped (the Diff model is
+        whole-file-text only); the eventual commit still captures the true state.
+        """
+        out = self._git("status", "--porcelain").stdout
+        changes: list[FileChange] = []
+        for line in out.splitlines():
+            if not line.strip():
+                continue
+            status, path = line[:2], line[3:].strip().strip('"')
+            if "D" in status:
+                continue
+            if " -> " in path:  # rename: take the new path
+                path = path.split(" -> ", 1)[1]
+            fp = self.path / path
+            if not fp.is_file():
+                continue
+            try:
+                content = fp.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            changes.append(FileChange(path.replace("\\", "/"), content))
+        return changes
 
     # --- Workspace interface -------------------------------------------
     def start_change(self, branch: str) -> None:

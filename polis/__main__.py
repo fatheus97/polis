@@ -14,7 +14,10 @@ import argparse
 import json
 
 from .app import build_government
+from .llm import ClaudeCliBackend
 from .orchestrator import OrchestratorConfig
+from .registry import ModelTier
+from .sandbox import DockerSandbox, LocalSandbox
 
 
 def _fmt_result(res) -> str:
@@ -53,6 +56,11 @@ def main(argv=None) -> int:
     pr = sub.add_parser("run", help="process pending feedback through the procedure")
     pr.add_argument("--all", action="store_true", help="drain the whole inbox")
     pr.add_argument("--max-revisions", type=int, default=2)
+    pr.add_argument("--real", action="store_true",
+                    help="use real LLM-backed agents (calls the claude CLI; costs money)")
+    pr.add_argument("--sandbox", choices=["local", "docker"], default="local")
+    pr.add_argument("--model", default=None,
+                    help="override the model for all branches (e.g. sonnet, opus, haiku)")
 
     prec = sub.add_parser("record", help="read the audit log (the Record)")
     prec.add_argument("--tail", type=int, default=20)
@@ -63,9 +71,17 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     config = None
+    build_kwargs = {}
     if args.cmd == "run":
         config = OrchestratorConfig(max_revisions=args.max_revisions)
-    gov = build_government(args.base, config=config)
+        if args.real:
+            backend = ClaudeCliBackend(default_model=args.model or "sonnet")
+            tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)
+                    if args.model else None)
+            build_kwargs.update(agents="real", backend=backend, tier=tier)
+        build_kwargs["sandbox"] = (DockerSandbox() if args.sandbox == "docker"
+                                   else LocalSandbox())
+    gov = build_government(args.base, config=config, **build_kwargs)
 
     if args.cmd == "budget":
         if args.appropriate:

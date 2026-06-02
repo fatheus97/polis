@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 from .models import TestResult
 
@@ -52,6 +53,50 @@ class LocalSandbox(Sandbox):
             ran=True,
             passed=passed,
             summary="tests passed" if passed else f"tests failed (exit {proc.returncode})",
+            details=output[-2000:],
+        )
+
+
+class DockerSandbox(Sandbox):
+    """Runs the project's tests inside a throwaway container with no network.
+
+    This is the real safety boundary the PRD requires for a fully-autonomous system
+    executing arbitrary code: the workspace is mounted, tests run isolated, the
+    container is removed afterward.
+    """
+
+    def __init__(self, image: str = "python:3.12-slim", test_command: str | None = None,
+                 timeout: int = 300, network: str = "none"):
+        self.image = image
+        self.test_command = test_command or "python -m unittest discover -p 'test_*.py'"
+        self.timeout = timeout
+        self.network = network
+
+    @staticmethod
+    def available() -> bool:
+        try:
+            return subprocess.run(["docker", "info"], capture_output=True,
+                                  timeout=15).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def run_tests(self, workspace) -> TestResult:
+        host = Path(workspace.path).resolve().as_posix()  # Docker Desktop accepts C:/...
+        cmd = [
+            "docker", "run", "--rm", "--network", self.network,
+            "-v", f"{host}:/work", "-w", "/work",
+            self.image, "sh", "-c", self.test_command,
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            return TestResult(ran=True, passed=False, summary="timeout",
+                              details=f"docker test run exceeded {self.timeout}s")
+        passed = proc.returncode == 0
+        output = (proc.stdout or "") + (proc.stderr or "")
+        return TestResult(
+            ran=True, passed=passed,
+            summary="tests passed (docker)" if passed else f"tests failed (exit {proc.returncode})",
             details=output[-2000:],
         )
 

@@ -29,6 +29,10 @@ class FakeWorkspace:
         self.merges: list = []
         self.discards = 0
         self.current = None
+        self.fake_changes: list = []  # what changed_files() reports (a real dev's edits)
+
+    def changed_files(self):
+        return list(self.fake_changes)
 
     def start_change(self, branch):
         self.current = branch

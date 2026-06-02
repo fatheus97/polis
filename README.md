@@ -17,14 +17,28 @@ reviewer. Three cross-cutting mechanisms are the brakes on a fully autonomous sy
 
 See [`docs/PRD.md`](docs/PRD.md) for the full design.
 
-## Status: Phase 0 — Skeleton
+## Status: Phase 1 — real agents (MVP)
 
-The deterministic procedure with **stub agents** (no real LLM yet). The goal of Phase 0 is to
-prove the machinery: the procedure routes, budgets, escalates, and persists correctly.
+The deterministic procedure now drives **real, model-backed officials** behind the same
+interfaces the Phase-0 stubs used:
 
 ```
 INTAKE → SPEC → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE→IMPLEMENT) → DONE | ESCALATE
 ```
+
+- **Architect** & **Reviewer** — the authenticated `claude` CLI in headless JSON mode
+  (read-only; they never touch the Polis repo).
+- **Dev** — wraps **Claude Code** to edit files in the workspace; its edits are captured as a
+  diff for review.
+- **Independent review** — the orchestrator is the only caller of the reviewer; the reviewer's
+  verdict is backed by **hard gates** (tests-green + constitution scan) that override a lenient
+  model.
+- **Real cost** — every call debits the Treasury its actual USD cost; transient API errors are
+  retried, and a persistent infra failure ESCALATES (it is never mistaken for a rejection).
+- **Sandbox** — `LocalSandbox` by default; `DockerSandbox` (no-network container) is available
+  when the Docker daemon is running.
+
+Stub agents (Phase 0) remain the default and power the hermetic test suite.
 
 ## Quick start (Phase 0, stdlib-only)
 
@@ -32,17 +46,22 @@ INTAKE → SPEC → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE→IMPLEM
 # run the test suite (no dependencies required)
 py -m unittest discover -t . -s tests -v
 
-# drive the procedure end-to-end from the CLI
+# drive the procedure end-to-end with STUB agents (free, deterministic)
 py -m polis budget --appropriate 1000          # fund the treasury
 py -m polis submit "Add a /health endpoint that returns ok"
 py -m polis run                                 # process the next feedback item
 py -m polis record --tail 30                    # read the audit log
+
+# drive it with REAL agents (calls the authenticated claude CLI; costs money)
+py -m polis --base .polis-real budget --appropriate 20
+py -m polis --base .polis-real submit "Add a function celsius_to_fahrenheit(c) in temperature.py"
+py -m polis --base .polis-real run --real        # add --sandbox docker to isolate test runs
 ```
 
 ## Roadmap
 
-- **Phase 0** — deterministic skeleton + stub agents (this).
-- **Phase 1** — real Architect / Dev (wraps Claude Code headless) / independent Reviewer;
-  sequential; autonomous merge on `tests-green + approval`; sandboxed execution.
+- **Phase 0** ✅ — deterministic skeleton + stub agents.
+- **Phase 1** ✅ — real Architect / Dev (wraps Claude Code) / independent Reviewer; sequential;
+  autonomous merge on `tests-green + approval`; Docker sandbox seam.
 - **Phase 2** — specialist dev hiring; multi-architect voting; constitutional review of PRDs.
 - **Phase 3** — parallel PRDs on worktrees; model decorrelation; deploy hooks.

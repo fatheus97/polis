@@ -19,7 +19,12 @@ class Agent:
     def __init__(self, role: str, branch: Branch, cost: float = 10.0):
         self.role = role
         self.branch = branch
+        # ``cost`` is the *estimate* used by the orchestrator's pre-call affordability
+        # gate (real spend is unknown until the model responds). ``last_cost`` holds
+        # the *actual* spend of the most recent call, which is what gets debited.
+        # For deterministic stubs the two are equal.
         self.cost = cost
+        self.last_cost = cost
         self.instance_id: str | None = None  # set by the Registry on spawn
 
     def __repr__(self) -> str:
@@ -48,6 +53,7 @@ class Dev(Agent):
         attempt: int = 0,
         review_feedback: str = "",
         directives: dict | None = None,
+        workspace=None,
     ) -> Diff:  # pragma: no cover - interface
         raise NotImplementedError
 

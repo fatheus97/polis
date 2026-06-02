@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .constitution import Constitution
+from .llm import LLMError
 from .models import Branch, FeedbackItem, RunResult, Stage, gen_id
 from .record import Record
 from .registry import Registry
@@ -118,9 +119,12 @@ class Orchestrator:
             if not self._afford(architect.cost, run_id):
                 return result(Stage.ESCALATE, Stage.SPEC,
                               "budget_exhausted: cannot fund SPEC")
-            self.treasury.debit("legislative:architect", architect.cost, "write_prd", run_id)
-            prd = architect.write_prd(feedback)
-            rec(Stage.SPEC, "legislative:architect", "prd", cost=architect.cost,
+            try:
+                prd = architect.write_prd(feedback)
+            except LLMError as e:
+                return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
+            self.treasury.debit("legislative:architect", architect.last_cost, "write_prd", run_id)
+            rec(Stage.SPEC, "legislative:architect", "prd", cost=architect.last_cost,
                 prd_id=prd.id, title=prd.title, revision=prd.revision)
 
             # --- IMPLEMENT → VERIFY → REVIEW (bounded revise loop) ---
@@ -129,16 +133,21 @@ class Orchestrator:
                 if not self._afford(dev.cost, run_id):
                     return result(Stage.ESCALATE, Stage.IMPLEMENT,
                                   "budget_exhausted: cannot fund IMPLEMENT")
-                self.treasury.debit("executive:dev", dev.cost, "implement", run_id)
                 branch = f"polis/{run_id}/attempt-{attempt}"
                 self.workspace.start_change(branch)
-                diff = dev.implement(
-                    prd, attempt=attempt,
-                    review_feedback=(verdict.feedback if verdict else ""),
-                    directives=feedback.directives,
-                )
+                try:
+                    diff = dev.implement(
+                        prd, attempt=attempt,
+                        review_feedback=(verdict.feedback if verdict else ""),
+                        directives=feedback.directives,
+                        workspace=self.workspace,
+                    )
+                except LLMError as e:
+                    self.workspace.discard()
+                    return result(Stage.ESCALATE, Stage.IMPLEMENT, f"llm_error: {e}")
                 self.workspace.apply(diff)
-                rec(Stage.IMPLEMENT, "executive:dev", "diff", cost=dev.cost, attempt=attempt,
+                self.treasury.debit("executive:dev", dev.last_cost, "implement", run_id)
+                rec(Stage.IMPLEMENT, "executive:dev", "diff", cost=dev.last_cost, attempt=attempt,
                     branch=branch, files=[c.path for c in diff.changes], summary=diff.summary)
 
                 # VERIFY (procedure runs the sandbox; no LLM cost)
@@ -151,9 +160,13 @@ class Orchestrator:
                     self.workspace.discard()
                     return result(Stage.ESCALATE, Stage.REVIEW,
                                   "budget_exhausted: cannot fund REVIEW")
-                self.treasury.debit("judicial:reviewer", reviewer.cost, "review", run_id)
-                verdict = reviewer.review(prd, diff, test_result, self.constitution)
-                rec(Stage.REVIEW, "judicial:reviewer", "verdict", cost=reviewer.cost,
+                try:
+                    verdict = reviewer.review(prd, diff, test_result, self.constitution)
+                except LLMError as e:
+                    self.workspace.discard()
+                    return result(Stage.ESCALATE, Stage.REVIEW, f"llm_error: {e}")
+                self.treasury.debit("judicial:reviewer", reviewer.last_cost, "review", run_id)
+                rec(Stage.REVIEW, "judicial:reviewer", "verdict", cost=reviewer.last_cost,
                     source=Branch.PROCEDURE, approved=verdict.approved,
                     reasons=verdict.reasons,
                     violations=[v.rule_id for v in verdict.violations])
