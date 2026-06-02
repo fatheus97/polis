@@ -1,0 +1,20 @@
+[project]
+name = "polis"
+version = "0.0.1"
+description = "A separation-of-powers multi-agent coding system."
+readme = "README.md"
+requires-python = ">=3.10"
+# Phase 0 is intentionally stdlib-only (sqlite3, json, argparse, unittest) so the
+# skeleton runs and tests pass with zero `pip install`. Real-LLM / coding-agent
+# integration in later phases will add dependencies here.
+dependencies = []
+
+[project.scripts]
+polis = "polis.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["polis", "polis.agents"]

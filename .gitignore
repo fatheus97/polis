@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Polis runtime state (local government data)
+.polis/
+*.sqlite
+*.sqlite3
+*.db
+record*.jsonl
+
+# Workspaces the government operates on (temp git repos for tests/demos)
+.work/
+work/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
