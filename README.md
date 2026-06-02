@@ -1,5 +1,8 @@
 # Polis — a separation-of-powers multi-agent coding system
 
+[![CI](https://github.com/fatheus97/polis/actions/workflows/ci.yml/badge.svg)](https://github.com/fatheus97/polis/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Polis evolves a codebase using three branches of "government," each a distinct agent type
 with distinct incentives, so that **no agent marks its own homework**:
 
