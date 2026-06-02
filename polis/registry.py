@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .agents.base import Agent
-from .agents.stubs import StubArchitect, StubDev, StubReviewer
+from .agents.stubs import StubArchitect, StubConstitutionalJudge, StubDev, StubReviewer
 from .models import Branch, gen_id
 
 
@@ -33,10 +33,26 @@ class ModelTier:
     dev: str = "haiku"
 
 
+# Curated specialist expertise. An unknown discipline is still hireable — its
+# expertise is synthesized from the name ("hire the expert if one doesn't exist").
+SPECIALISTS = {
+    "frontend": "frontend/UI engineering (HTML/CSS/JS/TS, components, accessibility, responsive layout)",
+    "backend": "backend/server engineering (APIs, services, business logic, data flow)",
+    "database": "database engineering (schema design, migrations, queries, indexing, integrity)",
+    "infra": "infrastructure engineering (provisioning, configuration, networking, IaC)",
+    "devops": "devops / CI-CD (pipelines, builds, deployment, automation)",
+    "cli": "command-line tooling (argument parsing, UX, scripting)",
+    "prompt": "LLM prompt engineering (prompt design, evaluation, structured output)",
+}
+
+
 class Registry:
     def __init__(self):
         self._templates: dict[str, RoleTemplate] = {}
         self._instances: dict[str, Agent] = {}
+        # Builds a dev for a given discipline (None => generalist). Set by
+        # default()/real(); enables specialist hiring without a fixed template per role.
+        self._dev_factory = None
 
     def register(self, template: RoleTemplate) -> None:
         self._templates[template.name] = template
@@ -51,6 +67,17 @@ class Registry:
         if name not in self._templates:
             raise KeyError(f"no role template registered: {name!r}")
         agent = self._templates[name].factory()
+        agent.instance_id = gen_id("inst")
+        self._instances[agent.instance_id] = agent
+        return agent
+
+    def hire_dev(self, discipline: str | None = None) -> Agent:
+        """Spawn a dev for a discipline (None => generalist). The 'hire a specialist'
+        primitive: real registries synthesize an expert for any discipline name."""
+        if self._dev_factory is not None:
+            agent = self._dev_factory(discipline)
+        else:
+            agent = self._templates["dev"].factory()
         agent.instance_id = gen_id("inst")
         self._instances[agent.instance_id] = agent
         return agent
@@ -72,12 +99,16 @@ class Registry:
                                   "Implements PRDs into diffs."))
         reg.register(RoleTemplate("reviewer", Branch.JUDICIAL, StubReviewer,
                                   "Judges diffs against PRD + constitution."))
+        reg.register(RoleTemplate("constitutional-judge", Branch.JUDICIAL,
+                                  StubConstitutionalJudge, "Reviews PRDs for constitutionality."))
+        reg._dev_factory = lambda discipline: StubDev(specialty=discipline)
         return reg
 
     @classmethod
     def real(cls, backend, tier: "ModelTier | None" = None) -> "Registry":
         """The Phase-1 government: real, model-backed officials sharing one backend."""
-        from .agents.llm_agents import ClaudeCodeDev, LLMArchitect, LLMReviewer
+        from .agents.llm_agents import (ClaudeCodeDev, LLMArchitect,
+                                        LLMConstitutionalJudge, LLMReviewer)
         tier = tier or ModelTier()
         reg = cls()
         reg.register(RoleTemplate("architect", Branch.LEGISLATIVE,
@@ -89,4 +120,15 @@ class Registry:
         reg.register(RoleTemplate("reviewer", Branch.JUDICIAL,
                                   lambda: LLMReviewer(backend, tier.reviewer),
                                   "LLM reviewer: diff -> verdict (+ hard gates)."))
+        reg.register(RoleTemplate("constitutional-judge", Branch.JUDICIAL,
+                                  lambda: LLMConstitutionalJudge(backend, tier.reviewer),
+                                  "LLM court: reviews PRDs for constitutionality."))
+
+        def _hire(discipline):
+            if discipline:
+                expertise = SPECIALISTS.get(discipline, f"{discipline} engineering")
+                return ClaudeCodeDev(backend, tier.dev, specialty=expertise)
+            return ClaudeCodeDev(backend, tier.dev)
+
+        reg._dev_factory = _hire
         return reg

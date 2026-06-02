@@ -35,6 +35,9 @@ class OrchestratorConfig:
     max_revisions: int = 2          # attempts = 1 initial + up to max_revisions
     per_task_cap: float | None = None
     spawn_cost: float = 0.0         # cost to staff one official (a spawn debits too)
+    constitutional_review: bool = False  # vet the PRD against the constitution first
+    max_prd_revisions: int = 1      # bounded amend loop when a PRD is unconstitutional
+    num_architects: int = 1         # >1 convenes a panel that proposes + votes on the PRD
 
 
 class Orchestrator:
@@ -94,13 +97,14 @@ class Orchestrator:
                 self.run_store.save(res, feedback)
             return res
 
-        # Staff the three branches. The orchestrator alone holds all three handles.
+        # Staff the branches. The orchestrator alone holds the handles. The dev is
+        # HIRED later, once the PRD names the discipline it needs (Phase 2).
         architect = self.registry.spawn("architect")
-        dev = self.registry.spawn("dev")
         reviewer = self.registry.spawn("reviewer")
+        dev = None
         rec(Stage.INTAKE, "procedure", "intake",
             feedback_id=feedback.id, text=feedback.text)
-        for agent in (architect, dev, reviewer):
+        for agent in (architect, reviewer):
             rec(Stage.INTAKE, "procedure", "spawn", role=agent.role,
                 instance=agent.instance_id, branch_of=agent.branch.value)
 
@@ -115,17 +119,115 @@ class Orchestrator:
                     self.treasury.debit(f"{a.branch.value}:{a.role}", cfg.spawn_cost,
                                         "spawn", run_id)
 
-            # --- SPEC (legislative) ---
-            if not self._afford(architect.cost, run_id):
-                return result(Stage.ESCALATE, Stage.SPEC,
-                              "budget_exhausted: cannot fund SPEC")
-            try:
-                prd = architect.write_prd(feedback)
-            except LLMError as e:
-                return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
-            self.treasury.debit("legislative:architect", architect.last_cost, "write_prd", run_id)
-            rec(Stage.SPEC, "legislative:architect", "prd", cost=architect.last_cost,
-                prd_id=prd.id, title=prd.title, revision=prd.revision)
+            # --- SPEC (legislative): one architect, or a panel that proposes + votes ---
+            if cfg.num_architects <= 1:
+                if not self._afford(architect.cost, run_id):
+                    return result(Stage.ESCALATE, Stage.SPEC,
+                                  "budget_exhausted: cannot fund SPEC")
+                try:
+                    prd = architect.write_prd(feedback)
+                except LLMError as e:
+                    return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
+                self.treasury.debit("legislative:architect", architect.last_cost,
+                                    "write_prd", run_id)
+                rec(Stage.SPEC, "legislative:architect", "prd", cost=architect.last_cost,
+                    prd_id=prd.id, title=prd.title, revision=prd.revision)
+            else:
+                # The standing architect is member 0; convene the rest of the panel.
+                panel, extras = [architect], []
+                for _ in range(cfg.num_architects - 1):
+                    a = self.registry.spawn("architect")
+                    panel.append(a)
+                    extras.append(a)
+                    rec(Stage.SPEC, "procedure", "spawn", role=a.role,
+                        instance=a.instance_id, branch_of=a.branch.value)
+                try:
+                    proposals = []
+                    for i, m in enumerate(panel):
+                        if not self._afford(m.cost, run_id):
+                            return result(Stage.ESCALATE, Stage.SPEC,
+                                          "budget_exhausted: cannot fund proposals")
+                        try:
+                            p = m.write_prd(feedback)
+                        except LLMError as e:
+                            return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
+                        self.treasury.debit("legislative:architect", m.last_cost,
+                                            "propose", run_id)
+                        proposals.append(p)
+                        rec(Stage.SPEC, "legislative:architect", "proposal",
+                            cost=m.last_cost, index=i, prd_id=p.id, title=p.title)
+                    tally = [0] * len(proposals)
+                    for i, m in enumerate(panel):
+                        if not self._afford(m.cost, run_id):
+                            return result(Stage.ESCALATE, Stage.SPEC,
+                                          "budget_exhausted: cannot fund vote")
+                        try:
+                            choice = m.vote(proposals)
+                        except LLMError as e:
+                            return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
+                        self.treasury.debit("legislative:architect", m.last_cost,
+                                            "vote", run_id)
+                        choice = choice if 0 <= choice < len(proposals) else 0
+                        tally[choice] += 1
+                        rec(Stage.SPEC, "legislative:architect", "vote",
+                            cost=m.last_cost, voter=i, choice=choice)
+                    winner = max(range(len(tally)), key=lambda k: (tally[k], -k))
+                    prd = proposals[winner]
+                    rec(Stage.SPEC, "procedure", "elected", prd_id=prd.id,
+                        winner=winner, tally=tally)
+                finally:
+                    for a in extras:
+                        self.registry.release(a)
+                        rec(Stage.DONE, "procedure", "release", role=a.role,
+                            instance=a.instance_id)
+
+            # --- CONSTITUTIONAL review of the PRD (opt-in) ---
+            # A judge reviews the LAW itself; an unconstitutional PRD is sent back to
+            # the architect to amend (bounded), and ESCALATES if it can't be fixed.
+            if cfg.constitutional_review:
+                judge = self.registry.spawn("constitutional-judge")
+                try:
+                    prd_rev = 0
+                    while True:
+                        if not self._afford(judge.cost, run_id):
+                            return result(Stage.ESCALATE, Stage.CONSTITUTIONAL,
+                                          "budget_exhausted: cannot fund constitutional review")
+                        try:
+                            ruling = judge.review_prd(prd, self.constitution)
+                        except LLMError as e:
+                            return result(Stage.ESCALATE, Stage.CONSTITUTIONAL, f"llm_error: {e}")
+                        self.treasury.debit("judicial:constitutional-judge",
+                                            judge.last_cost, "review_prd", run_id)
+                        rec(Stage.CONSTITUTIONAL, "judicial:constitutional-judge", "ruling",
+                            cost=judge.last_cost, source=Branch.PROCEDURE,
+                            constitutional=ruling.approved, reasons=ruling.reasons)
+                        if ruling.approved:
+                            break
+                        prd_rev += 1
+                        if prd_rev > cfg.max_prd_revisions:
+                            return result(Stage.ESCALATE, Stage.CONSTITUTIONAL,
+                                          f"unconstitutional_prd: {ruling.feedback}")
+                        if not self._afford(architect.cost, run_id):
+                            return result(Stage.ESCALATE, Stage.CONSTITUTIONAL,
+                                          "budget_exhausted: cannot fund PRD amendment")
+                        try:
+                            prd = architect.write_prd(feedback, prior=prd,
+                                                      review_feedback=ruling.feedback)
+                        except LLMError as e:
+                            return result(Stage.ESCALATE, Stage.CONSTITUTIONAL, f"llm_error: {e}")
+                        self.treasury.debit("legislative:architect", architect.last_cost,
+                                            "amend_prd", run_id)
+                        rec(Stage.CONSTITUTIONAL, "legislative:architect", "amend",
+                            cost=architect.last_cost, prd_id=prd.id, revision=prd.revision)
+                finally:
+                    self.registry.release(judge)
+                    rec(Stage.DONE, "procedure", "release",
+                        role=judge.role, instance=judge.instance_id)
+
+            # Hire the dev best suited to the PRD's discipline (generalist if none).
+            dev = self.registry.hire_dev(prd.discipline)
+            rec(Stage.IMPLEMENT, "procedure", "hire", role=dev.role,
+                discipline=prd.discipline or "generalist", instance=dev.instance_id)
 
             # --- IMPLEMENT → VERIFY → REVIEW (bounded revise loop) ---
             while True:
@@ -191,6 +293,8 @@ class Orchestrator:
                 # loop back to IMPLEMENT with the reviewer's feedback in hand
         finally:
             for agent in (reviewer, dev, architect):
+                if agent is None:
+                    continue
                 self.registry.release(agent)
                 rec(Stage.DONE, "procedure", "release",
                     role=agent.role, instance=agent.instance_id)

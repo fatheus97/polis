@@ -61,6 +61,10 @@ def main(argv=None) -> int:
     pr.add_argument("--sandbox", choices=["local", "docker"], default="local")
     pr.add_argument("--model", default=None,
                     help="override the model for all branches (e.g. sonnet, opus, haiku)")
+    pr.add_argument("--architects", type=int, default=1,
+                    help="convene a panel of N architects that propose + vote (default 1)")
+    pr.add_argument("--constitution-court", action="store_true",
+                    help="vet each PRD against the constitution before implementation")
 
     prec = sub.add_parser("record", help="read the audit log (the Record)")
     prec.add_argument("--tail", type=int, default=20)
@@ -73,7 +77,11 @@ def main(argv=None) -> int:
     config = None
     build_kwargs = {}
     if args.cmd == "run":
-        config = OrchestratorConfig(max_revisions=args.max_revisions)
+        config = OrchestratorConfig(
+            max_revisions=args.max_revisions,
+            num_architects=args.architects,
+            constitutional_review=args.constitution_court,
+        )
         if args.real:
             backend = ClaudeCliBackend(default_model=args.model or "sonnet")
             tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)

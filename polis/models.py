@@ -23,6 +23,7 @@ class Stage(str, Enum):
 
     INTAKE = "INTAKE"
     SPEC = "SPEC"
+    CONSTITUTIONAL = "CONSTITUTIONAL"  # judicial review of the PRD (the law) itself
     IMPLEMENT = "IMPLEMENT"
     VERIFY = "VERIFY"
     REVIEW = "REVIEW"
@@ -67,6 +68,9 @@ class PRD:
     feedback_id: str = ""
     id: str = field(default_factory=lambda: gen_id("prd"))
     revision: int = 0
+    # The engineering specialty best suited to implement this (Phase 2 hiring).
+    # None => a generalist dev handles it.
+    discipline: str | None = None
 
     def to_markdown(self) -> str:
         def bullets(items):

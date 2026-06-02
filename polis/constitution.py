@@ -61,6 +61,16 @@ class Constitution:
                         )
         return violations
 
+    def scan_text(self, text: str) -> list[Rule]:
+        """Return every regex rule that matches a plain string (used to vet a PRD's
+        text for clauses that would mandate a constitutional violation)."""
+        hits = []
+        for rule in self.rules:
+            rx = rule.compiled()
+            if rx is not None and rx.search(text):
+                hits.append(rule)
+        return hits
+
     @property
     def blocking_ids(self) -> set[str]:
         return {r.id for r in self.rules if r.severity == "block"}

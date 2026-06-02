@@ -12,7 +12,7 @@ drive specific scenarios (a leaked secret, a flaky implementation, etc.):
 from __future__ import annotations
 
 from ..models import Branch, Diff, FeedbackItem, FileChange, PRD, TestResult, Verdict
-from .base import Architect, Dev, Reviewer
+from .base import Architect, ConstitutionalJudge, Dev, Reviewer
 
 _PASSING_TEST = (
     "import unittest\n"
@@ -48,12 +48,23 @@ class StubArchitect(Architect):
             constraints=["Keep the change minimal and self-contained."],
             out_of_scope=["Unrelated refactors."],
             feedback_id=feedback.id,
+            # Lets tests drive specialist hiring: {"discipline": "backend"}.
+            discipline=feedback.directives.get("discipline"),
         )
+
+    def vote(self, proposals):
+        # Deterministic: prefer the most detailed proposal; ties -> lowest index.
+        best_i, best = 0, -1
+        for i, p in enumerate(proposals):
+            if len(p.acceptance_criteria) > best:
+                best, best_i = len(p.acceptance_criteria), i
+        return best_i
 
 
 class StubDev(Dev):
-    def __init__(self, cost: float = 10.0):
+    def __init__(self, cost: float = 10.0, specialty: str | None = None):
         super().__init__("dev", Branch.EXECUTIVE, cost)
+        self.specialty = specialty
 
     def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
         directives = directives or {}
@@ -108,3 +119,21 @@ class StubReviewer(Reviewer):
             feedback="" if approved else "; ".join(reasons),
             violations=violations,
         )
+
+
+class StubConstitutionalJudge(ConstitutionalJudge):
+    def __init__(self, cost: float = 15.0):
+        super().__init__("constitutional-judge", Branch.JUDICIAL, cost)
+
+    def review_prd(self, prd, constitution):
+        # Reject a PRD whose text would mandate a blocking constitution violation
+        # (e.g. a spec that literally asks to hardcode a secret).
+        hits = [r for r in constitution.scan_text(prd.to_markdown()) if r.severity == "block"]
+        if hits:
+            ids = ", ".join(sorted({r.id for r in hits}))
+            return Verdict(
+                approved=False,
+                reasons=[f"PRD would mandate a constitutional violation: {ids}."],
+                feedback=f"Revise the PRD so it no longer requires: {ids}.",
+            )
+        return Verdict(approved=True, reasons=["PRD is constitutional."])

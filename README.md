@@ -17,14 +17,27 @@ reviewer. Three cross-cutting mechanisms are the brakes on a fully autonomous sy
 
 See [`docs/PRD.md`](docs/PRD.md) for the full design.
 
-## Status: Phase 1 — real agents (MVP)
+## Status: Phase 2 — specialization & deliberation
 
-The deterministic procedure now drives **real, model-backed officials** behind the same
-interfaces the Phase-0 stubs used:
+Real, model-backed officials drive a procedure that now includes legislative deliberation and
+review of the law itself:
 
 ```
-INTAKE → SPEC → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE→IMPLEMENT) → DONE | ESCALATE
+INTAKE → SPEC → [CONSTITUTIONAL] → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE) → DONE | ESCALATE
+         (1 architect, or a panel that proposes + votes)
 ```
+
+**Phase 2 features (all opt-in; defaults = Phase 1):**
+- **Specialist hiring** — the architect tags each PRD with a `discipline`; the orchestrator
+  *hires* the matching specialist dev (frontend/backend/database/infra/devops/cli/prompt), and
+  synthesizes an expert on the fly for any discipline it doesn't already know.
+- **Multi-architect voting** — `--architects N` convenes a panel that each writes a proposal
+  independently, then votes; the winning PRD proceeds (the deliberation is on the Record).
+- **Constitutional court** — `--constitution-court` adds a judge that reviews the PRD against
+  the constitution *before* code is written; an unconstitutional PRD is sent back to the
+  architect to amend (bounded), then ESCALATES.
+
+**Phase 1 foundation:**
 
 - **Architect** & **Reviewer** — the authenticated `claude` CLI in headless JSON mode
   (read-only; they never touch the Polis repo).
@@ -56,6 +69,9 @@ py -m polis record --tail 30                    # read the audit log
 py -m polis --base .polis-real budget --appropriate 20
 py -m polis --base .polis-real submit "Add a function celsius_to_fahrenheit(c) in temperature.py"
 py -m polis --base .polis-real run --real        # add --sandbox docker to isolate test runs
+
+# Phase 2: a voting panel of architects + a constitutional court
+py -m polis --base .polis-real run --real --architects 3 --constitution-court
 ```
 
 ## Roadmap
@@ -63,5 +79,5 @@ py -m polis --base .polis-real run --real        # add --sandbox docker to isola
 - **Phase 0** ✅ — deterministic skeleton + stub agents.
 - **Phase 1** ✅ — real Architect / Dev (wraps Claude Code) / independent Reviewer; sequential;
   autonomous merge on `tests-green + approval`; Docker sandbox seam.
-- **Phase 2** — specialist dev hiring; multi-architect voting; constitutional review of PRDs.
+- **Phase 2** ✅ — specialist dev hiring; multi-architect voting; constitutional review of PRDs.
 - **Phase 3** — parallel PRDs on worktrees; model decorrelation; deploy hooks.

@@ -75,7 +75,8 @@ def failing():
 
 class Harness:
     def __init__(self, *, budget=1000.0, sandbox=None, workspace=None,
-                 max_revisions=2, per_task_cap=None, spawn_cost=0.0):
+                 max_revisions=2, per_task_cap=None, spawn_cost=0.0,
+                 constitutional_review=False, max_prd_revisions=1, num_architects=1):
         self.tmp = Path(tempfile.mkdtemp(prefix="polis-test-"))
         self.treasury = Treasury(":memory:")
         if budget:
@@ -91,7 +92,10 @@ class Harness:
             constitution=self.constitution, workspace=self.workspace, sandbox=self.sandbox,
             run_store=self.run_store,
             config=OrchestratorConfig(max_revisions=max_revisions,
-                                      per_task_cap=per_task_cap, spawn_cost=spawn_cost),
+                                      per_task_cap=per_task_cap, spawn_cost=spawn_cost,
+                                      constitutional_review=constitutional_review,
+                                      max_prd_revisions=max_prd_revisions,
+                                      num_architects=num_architects),
         )
 
     def events(self):

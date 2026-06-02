@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from ..llm import LLMBackend, LLMError, extract_json
 from ..models import Branch, Diff, PRD, Verdict
-from .base import Architect, Dev, Reviewer
+from .base import Architect, ConstitutionalJudge, Dev, Reviewer
 
 # Architect/reviewer must not mutate anything — they reason over text only.
 READONLY_ARGS = ["--disallowedTools", "Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"]
@@ -27,9 +27,18 @@ ARCHITECT_SYSTEM = (
     "test files, or 'changes to other files' as out-of-scope or as a forbidden "
     "change. 'out_of_scope' is only for unrelated features/refactors; 'constraints' "
     "are about quality and behavior, never about which files may be touched. "
+    "Also choose the single engineering specialty best suited to implement this in "
+    "'discipline' — one of: frontend, backend, database, infra, devops, cli, prompt — "
+    "or null if a generalist suffices. "
     "Output ONLY a JSON object with keys: title (string), goal (string), "
     "acceptance_criteria (array of strings), constraints (array of strings), "
-    "out_of_scope (array of strings). No prose."
+    "out_of_scope (array of strings), discipline (string or null). No prose."
+)
+
+VOTE_SYSTEM = (
+    "You are an Architect voting on competing PRD proposals for the SAME feedback. "
+    "Pick the single strongest proposal on merit (clarity, completeness, minimality). "
+    "Output ONLY a JSON object: {\"choice\": <0-based index>, \"reason\": <string>}. No prose."
 )
 
 DEV_SYSTEM = (
@@ -47,6 +56,16 @@ REVIEWER_SYSTEM = (
     "Output ONLY a JSON object with keys: approved (boolean), reasons (array of "
     "strings), feedback (string of concrete, actionable guidance for the dev if "
     "rejecting). No prose."
+)
+
+CONSTITUTIONAL_SYSTEM = (
+    "You are the Constitutional Court. Review a PROPOSED PRD (a law) for compatibility "
+    "with the constitution's invariants — BEFORE any code is written. Reject only a PRD "
+    "that, if implemented as written, would REQUIRE violating an invariant (e.g. "
+    "hardcoding secrets, disabling security). Ordinary feature PRDs are constitutional; "
+    "default to approval unless there is a clear conflict. Output ONLY a JSON object with "
+    "keys: constitutional (boolean), reasons (array of strings), feedback (string of "
+    "concrete guidance for the architect if rejecting). No prose."
 )
 
 
@@ -95,6 +114,7 @@ class LLMArchitect(Architect):
                 constraints=list(d.get("constraints", [])),
                 out_of_scope=list(d.get("out_of_scope", [])),
                 feedback_id=feedback.id, revision=revision,
+                discipline=(d.get("discipline") or None),
             )
         except LLMError:
             # Graceful degradation: a minimal PRD straight from the feedback.
@@ -104,25 +124,43 @@ class LLMArchitect(Architect):
                 feedback_id=feedback.id, revision=revision,
             )
 
+    def vote(self, proposals):
+        listing = "\n\n".join(f"[{i}] {p.title}\n{p.to_markdown()}"
+                              for i, p in enumerate(proposals))
+        resp = self.backend.complete(
+            f"Competing proposals:\n{listing}\n\nReturn your vote as JSON now.",
+            system=VOTE_SYSTEM, model=self.model, extra_args=READONLY_ARGS)
+        self.last_cost = resp.cost_usd
+        try:
+            idx = int(extract_json(resp.text).get("choice", 0))
+        except (LLMError, ValueError, TypeError):
+            idx = 0
+        return idx if 0 <= idx < len(proposals) else 0
+
 
 class ClaudeCodeDev(Dev):
     def __init__(self, backend: LLMBackend, model: str = "haiku",
-                 permission_mode: str = "acceptEdits", cost_estimate: float = 1.50):
+                 permission_mode: str = "acceptEdits", cost_estimate: float = 1.50,
+                 specialty: str | None = None):
         super().__init__("dev", Branch.EXECUTIVE, cost_estimate)
         self.backend = backend
         self.model = model
         self.permission_mode = permission_mode
+        self.specialty = specialty
 
     def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
         if workspace is None:
             raise ValueError("ClaudeCodeDev requires a workspace to edit")
+        system = DEV_SYSTEM
+        if self.specialty:
+            system += f"\nYou are a specialist in {self.specialty}; apply that expertise."
         parts = [f"Implement this PRD in the current repository:\n\n{prd.to_markdown()}"]
         if review_feedback:
             parts.append(f"\nThe previous attempt was REJECTED. Address this feedback:\n"
                          f"{review_feedback}")
         parts.append("\nWrite the implementation and matching test_*.py tests. Do not commit.")
         resp = self.backend.complete(
-            "\n".join(parts), system=DEV_SYSTEM, model=self.model,
+            "\n".join(parts), system=system, model=self.model,
             cwd=str(workspace.path), permission_mode=self.permission_mode,
         )
         self.last_cost = resp.cost_usd
@@ -177,3 +215,37 @@ class LLMReviewer(Reviewer):
             feedback = "; ".join(reasons)
         return Verdict(approved=approved, reasons=reasons, feedback=feedback,
                        violations=violations)
+
+
+class LLMConstitutionalJudge(ConstitutionalJudge):
+    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.30):
+        super().__init__("constitutional-judge", Branch.JUDICIAL, cost_estimate)
+        self.backend = backend
+        self.model = model
+
+    def review_prd(self, prd, constitution):
+        blocking = [r for r in constitution.scan_text(prd.to_markdown())
+                    if r.severity == "block"]
+        rules = "\n".join(f"- {r.id} ({r.severity}): {r.description}"
+                          for r in constitution.rules)
+        prompt = (f"Constitution invariants:\n{rules}\n\n"
+                  f"Proposed PRD:\n{prd.to_markdown()}\n\nReturn your ruling as JSON now.")
+        resp = self.backend.complete(prompt, system=CONSTITUTIONAL_SYSTEM,
+                                     model=self.model, extra_args=READONLY_ARGS)
+        self.last_cost = resp.cost_usd
+        try:
+            d = extract_json(resp.text)
+            approved = bool(d.get("constitutional", False))
+            reasons = list(d.get("reasons", []))
+            feedback = d.get("feedback", "") or ""
+        except LLMError:
+            approved, reasons, feedback = False, ["Court output was unparseable."], ""
+
+        # Hard gate: a PRD whose text literally matches a blocking rule is unconstitutional.
+        if blocking:
+            approved = False
+            ids = ", ".join(sorted({r.id for r in blocking}))
+            reasons.append(f"Hard gate: PRD text matches blocking rule(s): {ids}.")
+        if not approved and not feedback:
+            feedback = "; ".join(reasons)
+        return Verdict(approved=approved, reasons=reasons, feedback=feedback)

@@ -43,6 +43,10 @@ class Architect(Agent):
     ) -> PRD:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def vote(self, proposals: list[PRD]) -> int:
+        """Pick the index of the best proposal among competing PRDs (panel mode)."""
+        raise NotImplementedError
+
 
 class Dev(Agent):
     """Executive: turns a PRD into a Diff. Real implementations wrap a coding agent."""
@@ -72,4 +76,13 @@ class Reviewer(Agent):
         test_result: TestResult,
         constitution,
     ) -> Verdict:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+class ConstitutionalJudge(Agent):
+    """Judicial review of the LAW (a PRD) against the constitution, BEFORE any code is
+    written. ``approved`` means 'constitutional'. Independent — orchestrator-invoked.
+    """
+
+    def review_prd(self, prd: PRD, constitution) -> Verdict:  # pragma: no cover
         raise NotImplementedError
