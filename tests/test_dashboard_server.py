@@ -60,6 +60,17 @@ class DashboardServerTest(unittest.TestCase):
     def test_unknown_run_detail_404(self):
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
 
+    def test_config_get_default(self):
+        c = self.client.get("/api/config").json()
+        self.assertTrue(c["managed_default"])
+        self.assertEqual(c["main_branch"], "main")
+
+    def test_config_set_workspace(self):
+        target = tempfile.mkdtemp(prefix="polis-target-")
+        c = self.client.post("/api/config", json={"workspace": target}).json()
+        self.assertFalse(c["managed_default"])
+        self.assertIn(Path(target).name, c["workspace"])
+
     def test_events_capped_even_with_since_ts_zero(self):
         # Regression: since_ts=0 must NOT bypass the tail cap and dump the whole record.
         from polis.models import Stage

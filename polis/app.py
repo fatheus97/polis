@@ -17,6 +17,7 @@ from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
 from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
+from .projectcfg import resolve_main_branch, resolve_workspace
 from .record import Record
 from .registry import ModelTier, Registry
 from .sandbox import LocalSandbox, Sandbox
@@ -55,8 +56,11 @@ class Government:
         The inbox is touched only from this (main) thread, so it needs no locking."""
         if not items:
             return []
-        manager = WorktreeManager(self.base / "workspace",
-                                  work_root=self.base / "worktrees")
+        # Honor the configured target repo (not the hardcoded default) so parallel
+        # runs develop the same repo as sequential ones.
+        manager = WorktreeManager(self.workspace.path,
+                                  work_root=self.base / "worktrees",
+                                  main_branch=getattr(self.workspace, "main_branch", "main"))
 
         def run_one(item) -> RunResult:
             ws = manager.create_worktree(item.id)
@@ -111,7 +115,15 @@ def build_government(
         registry = Registry.default()
     run_store = RunStore(base / "runs.sqlite")
     inbox = FeedbackInbox(base / "feedback.sqlite")
-    workspace = workspace or GitWorkspace(workspace_dir or (base / "workspace"))
+    if workspace is None:
+        ws_path = resolve_workspace(base, workspace_dir)   # override > config > default
+        # Don't silently git-init a user's existing non-git directory (footgun).
+        is_default = ws_path == (base / "workspace").resolve()
+        if (not is_default and ws_path.exists() and any(ws_path.iterdir())
+                and not (ws_path / ".git").exists()):
+            raise ValueError(f"target repo exists but is not a git repository "
+                             f"(refusing to git-init it): {ws_path}")
+        workspace = GitWorkspace(ws_path, main_branch=resolve_main_branch(base))
     sandbox = sandbox or LocalSandbox()
     orchestrator = Orchestrator(
         registry=registry, treasury=treasury, record=record, constitution=constitution,
