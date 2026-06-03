@@ -56,6 +56,29 @@ class ProjectCfgTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_government(self.base)  # refuses to git-init an existing non-git dir
 
+    def test_protect_core_only_when_developing_polis_repo(self):
+        # The protect-core path-rule must be ACTIVE only when the target repo is Polis's own
+        # repo; for any other app it's dropped so a stray polis/ dir isn't falsely blocked.
+        # Inject a fake workspace so we never construct git on the real repo.
+        import polis as polis_pkg
+        from polis.app import build_government
+        polis_root = Path(polis_pkg.__file__).resolve().parent.parent
+
+        class FakeWS:
+            def __init__(self, p):
+                self.path = p
+
+        gov = build_government(self.base, workspace=FakeWS(Path("/some/other/app")))
+        try:
+            self.assertNotIn("protect-core", {r.id for r in gov.constitution.rules})
+        finally:
+            gov.close()
+        gov2 = build_government(self.base, workspace=FakeWS(polis_root))
+        try:
+            self.assertIn("protect-core", {r.id for r in gov2.constitution.rules})
+        finally:
+            gov2.close()
+
 
 @unittest.skipUnless(HAVE_GIT, "git required")
 class ConfiguredRepoTest(unittest.TestCase):

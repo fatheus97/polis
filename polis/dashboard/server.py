@@ -14,7 +14,6 @@ from pathlib import Path
 import json
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -73,9 +72,24 @@ def create_app(base) -> FastAPI:
     app = FastAPI(title="Polis Dashboard", docs_url="/api/docs", lifespan=lifespan)
     app.state.run_manager = rm
     static = _static_dir()
-    # CORS so a widget embedded in an external app (its own origin) can POST reports.
-    app.add_middleware(CORSMiddleware, allow_origins=resolve_intake_origins(base),
-                       allow_methods=["GET", "POST"], allow_headers=["*"])
+
+    # CORS is scoped to ONLY the intake endpoint (a widget embedded in an external app posts
+    # cross-origin). The action endpoints (/api/run, /api/budget, /api/feedback) deliberately
+    # get NO CORS headers, so a random page in a local user's browser can't drive them.
+    @app.middleware("http")
+    async def _intake_cors(request, call_next):
+        if request.url.path != "/api/report-intake":
+            return await call_next(request)
+        origins = resolve_intake_origins(base)
+        origin = request.headers.get("origin", "")
+        allow = "*" if "*" in origins else (origin if origin in origins else "")
+        resp = (Response(status_code=204) if request.method == "OPTIONS"
+                else await call_next(request))
+        if allow:
+            resp.headers["Access-Control-Allow-Origin"] = allow
+            resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            resp.headers["Access-Control-Allow-Headers"] = "*"
+        return resp
 
     def record_path() -> Path:
         return base / "record.jsonl"

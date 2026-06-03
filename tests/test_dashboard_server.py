@@ -123,6 +123,13 @@ class DashboardServerTest(unittest.TestCase):
         self.assertIn(r.status_code, (200, 204))
         self.assertIn("access-control-allow-origin", {k.lower() for k in r.headers})
 
+    def test_cors_not_applied_to_action_endpoints(self):
+        # CORS is scoped to the intake endpoint only — action endpoints get no allow-origin.
+        r = self.client.options("/api/budget",
+                                headers={"Origin": "http://evil.example",
+                                         "Access-Control-Request-Method": "POST"})
+        self.assertNotIn("access-control-allow-origin", {k.lower() for k in r.headers})
+
     def test_events_capped_even_with_since_ts_zero(self):
         # Regression: since_ts=0 must NOT bypass the tail cap and dump the whole record.
         from polis.models import Stage

@@ -30,7 +30,7 @@ class ReportStoreTest(unittest.TestCase):
         png = b"\x89PNG\r\n\x1a\n" + b"fakeimagebytes"
         r = self.store.create(text="x", screenshot_bytes=png, screenshot_ext="png")
         self.assertEqual(r["screenshot"], "screenshot.png")
-        self.assertEqual(r["screenshot_bytes"], len(png))
+        self.assertEqual(r["screenshot_size"], len(png))
         p = self.store.screenshot_path(r["id"])
         self.assertIsNotNone(p)
         self.assertEqual(p.read_bytes(), png)
@@ -62,6 +62,13 @@ class ReportStoreTest(unittest.TestCase):
 
     def test_get_missing_returns_none(self):
         self.assertIsNone(self.store.get("rpt-nope"))
+
+    def test_cookies_redacted_on_disk(self):
+        r = self.store.create(text="x", state={"cookies": "session=secret-token",
+                                               "url": "http://x/"})
+        got = self.store.get(r["id"])
+        self.assertEqual(got["state"]["cookies"], "[redacted]")   # secret never persisted
+        self.assertEqual(got["state"]["url"], "http://x/")        # rest of state intact
 
 
 if __name__ == "__main__":

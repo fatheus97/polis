@@ -27,6 +27,14 @@ def _safe_ext(ext: str | None) -> str:
     return ("".join(c for c in (ext or "") if c.isalnum())[:5]) or "png"
 
 
+ERROR_LEVELS = ("error", "uncaught", "unhandledrejection")
+
+
+def console_errors(console) -> list:
+    """The error-level entries of a captured console buffer (shared by runner + clerk)."""
+    return [c for c in (console or []) if c.get("level") in ERROR_LEVELS]
+
+
 class ReportStore:
     def __init__(self, base):
         self.root = Path(base) / "reports"
@@ -57,6 +65,10 @@ class ReportStore:
             if screenshot_bytes:
                 shot = f"screenshot.{_safe_ext(screenshot_ext)}"
                 (d / shot).write_bytes(screenshot_bytes)
+            # Never persist raw session cookies to disk — keep a hint, drop the values.
+            safe_state = dict(state or {})
+            if safe_state.get("cookies"):
+                safe_state["cookies"] = "[redacted]"
             data = {
                 "id": rid,
                 "created_at": time.time(),
@@ -65,9 +77,9 @@ class ReportStore:
                 "url": url,
                 "user_agent": user_agent,
                 "viewport": viewport or {},
-                "state": state or {},
+                "state": safe_state,
                 "screenshot": shot,
-                "screenshot_bytes": len(screenshot_bytes) if screenshot_bytes else 0,
+                "screenshot_size": len(screenshot_bytes) if screenshot_bytes else 0,
                 "feedback_id": None,
                 "ticket": None,
                 "ticket_status": "none",   # none | pending | done | error

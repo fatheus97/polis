@@ -9,6 +9,7 @@ Stdlib + the LLM backend, so it's unit-testable with FakeLLM.
 from __future__ import annotations
 
 from .llm import LLMError, extract_json
+from .reports import console_errors
 
 CLERK_SYSTEM = (
     "You are the Clerk of an autonomous software team. Turn a raw tester bug/feature "
@@ -27,7 +28,7 @@ SEVERITIES = {"trivial", "minor", "major", "critical"}
 def _render_state(state: dict | None) -> str:
     state = state or {}
     console = state.get("console") or []
-    errs = [c for c in console if c.get("level") in ("error", "uncaught", "unhandledrejection")]
+    errs = console_errors(console)
     chosen = errs[-20:] or console[-10:]
     lines = [f"[{c.get('level')}] " + " ".join(map(str, c.get("args", [])))[:300] for c in chosen]
     keys = list((state.get("localStorage") or {}).keys())[:15]

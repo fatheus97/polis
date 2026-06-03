@@ -24,8 +24,9 @@ from pathlib import Path
 def _summarize_state(state: dict) -> dict:
     """A compact, architect-friendly digest of the captured web state (the full state
     stays in the report; this rides on the feedback item's directives)."""
+    from ..reports import console_errors
     console = state.get("console") or []
-    errs = [c for c in console if c.get("level") in ("error", "uncaught", "unhandledrejection")]
+    errs = console_errors(console)
     return {
         "url": state.get("url"),
         "console_total": len(console),
