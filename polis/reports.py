@@ -36,19 +36,24 @@ def console_errors(console) -> list:
 
 
 class ReportStore:
+    # Process-wide monotonic clock so created_at is strictly increasing across ALL stores
+    # (each request builds a fresh ReportStore), keeping newest-first ordering deterministic
+    # even under a coarse (e.g. Windows) wall clock where time.time() can tie.
+    _ts_lock = threading.Lock()
+    _last_ts = 0.0
+
     def __init__(self, base):
         self.root = Path(base) / "reports"
         self._lock = threading.Lock()
-        self._last_ts = 0.0  # monotonic stamp so newest-first ordering is stable under a coarse clock
 
-    def _stamp(self) -> float:
-        # time.time() can tie for two rapid creates (esp. on Windows); bump so created_at
-        # is strictly increasing within this store and list() ordering is deterministic.
-        ts = time.time()
-        if ts <= self._last_ts:
-            ts = self._last_ts + 1e-6
-        self._last_ts = ts
-        return ts
+    @classmethod
+    def _stamp(cls) -> float:
+        with cls._ts_lock:
+            ts = time.time()
+            if ts <= cls._last_ts:
+                ts = cls._last_ts + 1e-6
+            cls._last_ts = ts
+            return ts
 
     def _dir(self, rid: str) -> Path:
         return self.root / rid

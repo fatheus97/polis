@@ -4,7 +4,8 @@ Triggering a run from a browser is the risky part: a real run takes minutes and 
 money. So:
   * runs execute on a SINGLE-worker pool (serialized — the browser can't spawn chaos);
   * trigger_run() returns a job_id IMMEDIATELY (never blocks the HTTP request);
-  * the default is STUB (free); a real run requires the caller to have confirmed;
+  * real-vs-stub is a config decision (`real_runs`, default real) — NOT a per-request
+    field — so the choice is deliberate and lives in one place;
   * the Treasury still hard-gates spend (the orchestrator ESCALATEs when out of funds).
 
 FeedbackInbox is main-thread-only (check_same_thread=True). We never share one inbox

@@ -18,10 +18,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..projectcfg import (is_managed_default, resolve_auto_run, resolve_intake_origins,
-                          resolve_intake_url, resolve_main_branch, resolve_real_runs,
-                          resolve_testing_mode, resolve_ticketizer, resolve_workspace,
-                          write_config)
+from ..projectcfg import (is_managed_default, read_config, resolve_auto_run,
+                          resolve_intake_origins, resolve_intake_url, resolve_main_branch,
+                          resolve_real_runs, resolve_testing_mode, resolve_ticketizer,
+                          resolve_workspace, write_config)
 from ..reports import ReportStore
 from . import data, reader
 from .runner import RunManager
@@ -271,6 +271,11 @@ def serve(base, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = 
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     print(f"Polis dashboard → {url}  (base: {Path(base).resolve()})")
+    # One-time heads-up: real-vs-stub defaults to REAL. Only warn when it isn't explicitly
+    # set in config, so a user who has made a deliberate choice isn't nagged.
+    if "real_runs" not in read_config(base) and resolve_real_runs(base):
+        print("  ⚠ dashboard runs use REAL LLM agents by default ($). Switch to free "
+              "stubs:  py -m polis --base <base> config --real-runs off")
     try:
         uvicorn.run(app, host=host, port=port, log_level="warning")
     except OSError as e:
