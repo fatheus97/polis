@@ -102,6 +102,32 @@ class ClerkFlowTest(unittest.TestCase):
         pend = reader.read_pending_feedback(self.base)
         self.assertTrue(any("Fix save" in p["text"] for p in pend))
 
+    def test_clerk_failure_still_files_feedback(self):
+        # Simulate the claude CLI being unavailable on a fresh install: the backend blows
+        # up before distill. The report must NOT be lost — it falls back to a bare feedback
+        # item so it still reaches the architect.
+        from polis.reports import ReportStore
+
+        def boom():
+            raise RuntimeError("claude CLI not found")
+        self.rm._clerk_backend_factory = boom
+
+        out = self.rm.intake_report(text="login is broken", state={"console": []})
+        self.assertEqual(out["ticket_status"], "pending")
+
+        store = ReportStore(self.base)
+        r = None
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            r = store.get(out["report_id"])
+            if r and r["ticket_status"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+        self.assertEqual(r["ticket_status"], "error", r)
+        self.assertIsNotNone(r["feedback_id"])  # report still reached the architect
+        pend = reader.read_pending_feedback(self.base)
+        self.assertTrue(any("login is broken" in p["text"] for p in pend))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -121,8 +121,20 @@ class RunManager:
             if resolve_auto_run(self.base):
                 self.trigger_run(real=False, feedback_id=fb["id"], opts={})
         except Exception as e:  # the Clerk worker must never die
+            # Don't let a Clerk failure (e.g. the claude CLI being unavailable on a fresh
+            # install) swallow the report: mark the ticket errored, then STILL file a bare
+            # feedback item from the raw text so the report always reaches the architect
+            # (mirrors the non-ticketizer path). All wrapped so the worker can't die.
             try:
                 store.set_ticket(report_id, None, status="error", error=str(e)[:300])
+                report = store.get(report_id)
+                if report and not report.get("feedback_id"):
+                    fb = self.submit_feedback(
+                        report.get("text") or "(no description)", by=submitted_by,
+                        directives={"report_id": report_id,
+                                    "source": "feedback-widget:clerk-fallback",
+                                    "state_summary": _summarize_state(report.get("state") or {})})
+                    store.set_feedback_id(report_id, fb["id"])
             except Exception:
                 pass
 
