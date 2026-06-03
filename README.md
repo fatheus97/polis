@@ -20,15 +20,26 @@ reviewer. Three cross-cutting mechanisms are the brakes on a fully autonomous sy
 
 See [`docs/PRD.md`](docs/PRD.md) for the full design.
 
-## Status: Phase 3 — parallel legislature
+## Status: Phase 4 — autonomous tester feedback loop
 
 Real, model-backed officials run a procedure with legislative deliberation, review of the law,
-and **multiple PRDs in flight at once**:
+**multiple PRDs in flight at once**, and now a **closed feedback loop from human testers**:
 
 ```
 INTAKE → SPEC → [CONSTITUTIONAL] → IMPLEMENT → VERIFY → REVIEW → (MERGE | REVISE) → [DEPLOY] → DONE | ESCALATE
          (1 architect, or a panel that proposes + votes)
 ```
+
+**Phase 4 features (opt-in, `testing_mode`):**
+- **Tester feedback widget** — a floating widget injected into apps Polis develops (and the
+  dashboard itself); a tester describes an issue, pastes a screenshot, and submits. The widget
+  auto-captures console/storage/cookies/url so the report carries its own context.
+- **The Clerk** — an async ticketizer that distills each raw report + captured state into a
+  structured ticket and files it as architect feedback (config-gated; default on, the raw
+  report is always preserved).
+- **protect-core** — a constitution path-rule so that when Polis develops *its own* repo it can
+  only touch `polis/dashboard/`, tests, and docs — never its orchestration core, and it cannot
+  weaken the constitution itself.
 
 **Phase 3 features (opt-in):**
 - **Parallel PRDs on git worktrees** — `run --parallel N` runs N pending PRDs concurrently,
@@ -132,6 +143,8 @@ py -m polis --base .polis-dog dashboard      # click the 🐞 button to file a r
   autonomous merge on `tests-green + approval`; Docker sandbox seam.
 - **Phase 2** ✅ — specialist dev hiring; multi-architect voting; constitutional review of PRDs.
 - **Phase 3** ✅ — parallel PRDs on git worktrees; model decorrelation; deploy hooks.
+- **Phase 4** ✅ — autonomous tester feedback loop: in-app widget → intake → Clerk ticketizer →
+  architect feedback; a protect-core guard for self-development.
 
 ## License
 
