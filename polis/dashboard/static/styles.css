@@ -95,3 +95,5 @@ button { padding: .35rem .7rem; margin: 0; }
 .rdetail .ticket { font-size: .85rem; }
 .rdetail .state { font-size: .72rem; max-height: 200px; overflow: auto; background: #0f1320; padding: .4rem; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
 .rdetail details summary { cursor: pointer; }
+.rdetail .runticket { align-self: flex-start; background: var(--b-executive); border-color: var(--b-executive); color: #06281c; font-weight: 600; }
+.flags { gap: 1rem; align-items: center; margin: .1rem 0 .35rem; flex-wrap: wrap; }

@@ -128,6 +128,21 @@ class ClerkFlowTest(unittest.TestCase):
         pend = reader.read_pending_feedback(self.base)
         self.assertTrue(any("login is broken" in p["text"] for p in pend))
 
+    def test_auto_run_triggers_a_real_run(self):
+        # with auto_run on, a distilled ticket must kick off a REAL run (not a stub).
+        from polis import projectcfg
+        projectcfg.write_config(self.base, {"auto_run": True})
+        calls = []
+        self.rm.trigger_run = lambda **kw: (calls.append(kw), {"job_id": "j"})[1]
+
+        self.rm.intake_report(text="auto please", state={"console": []})
+        deadline = time.time() + 20
+        while time.time() < deadline and not calls:
+            time.sleep(0.05)
+        self.assertTrue(calls, "auto_run did not trigger a run")
+        self.assertIs(calls[0].get("real"), True)        # real, not a stub
+        self.assertIsNotNone(calls[0].get("feedback_id"))  # targets the distilled ticket
+
 
 if __name__ == "__main__":
     unittest.main()
