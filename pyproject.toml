@@ -13,7 +13,7 @@ dependencies = []
 # The web dashboard is an OPTIONAL extra so the core stays standard-library only.
 # Install with:  pip install -e '.[dashboard]'
 [project.optional-dependencies]
-dashboard = ["fastapi>=0.110", "uvicorn>=0.27"]
+dashboard = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9"]
 
 [project.scripts]
 polis = "polis.__main__:main"

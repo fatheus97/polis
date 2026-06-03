@@ -22,6 +22,14 @@
       "severity": "block",
       "check": "regex",
       "pattern": "(?i)(verify\\s*=\\s*False|InsecureRequestWarning|NODE_TLS_REJECT_UNAUTHORIZED\\s*=\\s*[\"']?0)"
+    },
+    {
+      "id": "protect-core",
+      "description": "Agents may not modify Polis core files; only polis/dashboard/, tests, and docs. Only the sovereign edits the constitution.",
+      "severity": "block",
+      "check": "regex",
+      "target": "path",
+      "pattern": "^polis/(?!dashboard/).*\\.py$|^config/constitution\\.json$"
     }
   ]
 }

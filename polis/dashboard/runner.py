@@ -21,6 +21,21 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
+def _summarize_state(state: dict) -> dict:
+    """A compact, architect-friendly digest of the captured web state (the full state
+    stays in the report; this rides on the feedback item's directives)."""
+    from ..reports import console_errors
+    console = state.get("console") or []
+    errs = console_errors(console)
+    return {
+        "url": state.get("url"),
+        "console_total": len(console),
+        "console_errors": len(errs),
+        "last_errors": [" ".join(map(str, c.get("args", [])))[:200] for c in errs[-3:]],
+        "storage_keys": list((state.get("localStorage") or {}).keys())[:10],
+    }
+
+
 class RunManager:
     def __init__(self, base):
         self.base = Path(base)
@@ -29,6 +44,8 @@ class RunManager:
         self._jobs: dict[str, dict] = {}
         self._jobs_lock = threading.Lock()
         self._max_jobs = 200                                # bound the in-memory history
+        self._clerk_executor = ThreadPoolExecutor(max_workers=1)  # distillation, off the run path
+        self._clerk_backend_factory = None                  # test seam (default ClaudeCliBackend)
 
     # --- write actions (called on request threads) -------------------------
     def submit_feedback(self, text: str, by: str = "tester", directives=None) -> dict:
@@ -54,6 +71,80 @@ class RunManager:
             finally:
                 t.close()
         return snap
+
+    # --- tester feedback intake --------------------------------------------
+    def intake_report(self, *, text, submitted_by="tester", url="", user_agent="",
+                      viewport=None, state=None, screenshot_bytes=None,
+                      screenshot_ext=None) -> dict:
+        """Store a tester report (raw text + screenshot + captured state). In 4a a
+        feedback item is created immediately; 4b defers this to the async Clerk when
+        the ticketizer is on."""
+        from ..reports import ReportStore
+        store = ReportStore(self.base)
+        report = store.create(text=text, submitted_by=submitted_by, url=url,
+                              user_agent=user_agent, viewport=viewport or {},
+                              state=state or {}, screenshot_bytes=screenshot_bytes,
+                              screenshot_ext=screenshot_ext)
+        from ..projectcfg import resolve_ticketizer
+        if resolve_ticketizer(self.base):
+            # Defer the feedback item to the async Clerk (distill -> ticket).
+            store.set_ticket(report["id"], None, status="pending")
+            self._clerk_executor.submit(self._clerk_job, report["id"], submitted_by)
+            return {"report_id": report["id"], "feedback_id": None, "ticket_status": "pending"}
+        fb = self.submit_feedback(
+            text or "(no description)", by=submitted_by,
+            directives={"report_id": report["id"], "source": "feedback-widget",
+                        "state_summary": _summarize_state(report.get("state") or {})})
+        store.set_feedback_id(report["id"], fb["id"])
+        return {"report_id": report["id"], "feedback_id": fb["id"], "ticket_status": "none"}
+
+    def _clerk_job(self, report_id, submitted_by):
+        from ..reports import ReportStore
+        from ..projectcfg import resolve_auto_run
+        store = ReportStore(self.base)
+        try:
+            from ..clerk import distill_report, ticket_to_text
+            if self._clerk_backend_factory is not None:
+                backend = self._clerk_backend_factory()
+            else:
+                from ..llm import ClaudeCliBackend
+                backend = ClaudeCliBackend()
+            report = store.get(report_id)
+            ticket = distill_report(backend, report)
+            store.set_ticket(report_id, ticket, status="done")
+            fb = self.submit_feedback(
+                ticket_to_text(ticket), by=submitted_by,
+                directives={"report_id": report_id, "source": "feedback-widget:clerk",
+                            "severity": ticket.get("severity"),
+                            "state_summary": _summarize_state(report.get("state") or {})})
+            store.set_feedback_id(report_id, fb["id"])
+            if resolve_auto_run(self.base):
+                self.trigger_run(real=False, feedback_id=fb["id"], opts={})
+        except Exception as e:  # the Clerk worker must never die
+            # Don't let a Clerk failure (e.g. the claude CLI being unavailable on a fresh
+            # install) swallow the report: mark the ticket errored, then STILL file a bare
+            # feedback item from the raw text so the report always reaches the architect
+            # (mirrors the non-ticketizer path). All wrapped so the worker can't die.
+            try:
+                store.set_ticket(report_id, None, status="error", error=str(e)[:300])
+                report = store.get(report_id)
+                if report and not report.get("feedback_id"):
+                    fb = self.submit_feedback(
+                        report.get("text") or "(no description)", by=submitted_by,
+                        directives={"report_id": report_id,
+                                    "source": "feedback-widget:clerk-fallback",
+                                    "state_summary": _summarize_state(report.get("state") or {})})
+                    store.set_feedback_id(report_id, fb["id"])
+            except Exception:
+                pass
+
+    def reports(self) -> list:
+        from ..reports import ReportStore
+        return ReportStore(self.base).list()
+
+    def report(self, report_id: str):
+        from ..reports import ReportStore
+        return ReportStore(self.base).get(report_id)
 
     # --- triggering a run (non-blocking) -----------------------------------
     def trigger_run(self, *, real: bool = False, feedback_id: str | None = None,
@@ -120,3 +211,4 @@ class RunManager:
         # wait=True by default: let an in-flight run finish rather than abandon it
         # mid-merge / mid-SQLite-write (which would corrupt state).
         self._executor.shutdown(wait=wait)
+        self._clerk_executor.shutdown(wait=wait)

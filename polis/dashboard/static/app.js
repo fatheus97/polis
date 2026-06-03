@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { selected: null, lastFeedTs: 0 };
+const state = { selected: null, lastFeedTs: 0, openReport: null, reportsCache: [] };
 
 async function api(method, path, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
@@ -133,16 +133,64 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = "none", 2500);
 }
 
+function ticketBadge(r) {
+  if (r.ticket_status === "pending") return `<span class="badge flight">● distilling</span>`;
+  if (r.ticket_status === "error") return `<span class="badge escalate">⚠ clerk error</span>`;
+  if (r.ticket && r.ticket.severity) return `<span class="badge done">${esc(r.ticket.severity)}</span>`;
+  return "";
+}
+function reportDetail(r) {
+  let h = "";
+  if (r.screenshot) h += `<img class="shot" src="/api/reports/${esc(r.id)}/screenshot" alt="screenshot">`;
+  if (r.ticket) {
+    const t = r.ticket;
+    h += `<div class="ticket"><strong>${esc(t.title || "")}</strong>` +
+      (t.severity ? ` <span class="muted">[${esc(t.severity)}]</span>` : "") +
+      `<div>${esc(t.description || "")}</div>` +
+      ((t.repro_steps || []).length ? `<div class="muted">repro: ${esc((t.repro_steps || []).join(" → "))}</div>` : "") +
+      (t.expected ? `<div class="muted">expected: ${esc(t.expected)}</div>` : "") +
+      (t.actual ? `<div class="muted">actual: ${esc(t.actual)}</div>` : "") + `</div>`;
+  } else if (r.ticket_status === "pending") {
+    h += `<div class="muted">distilling ticket…</div>`;
+  }
+  if (r.ticket_error) h += `<div class="muted">clerk error: ${esc(r.ticket_error)}</div>`;
+  h += `<details><summary class="muted">captured state</summary><pre class="state">${esc(JSON.stringify(r.state || {}, null, 2))}</pre></details>`;
+  h += `<p class="muted">${esc(r.url || "")} · ${r.feedback_id ? "feedback " + esc(r.feedback_id) : "no feedback item"}</p>`;
+  return `<div class="rdetail">${h}</div>`;
+}
+function renderReports(list) {
+  $("reportcount").textContent = list.length ? `(${list.length})` : "";
+  if (!list.length) { $("reports").innerHTML = `<p class="muted">No reports yet.</p>`; return; }
+  $("reports").innerHTML = list.map((r) => `
+    <div class="report ${r.id === state.openReport ? "open" : ""}" data-id="${r.id}">
+      <div class="rhead">
+        ${ticketBadge(r)}
+        <span class="ttl">${esc(r.text || "(no description)")}</span>
+        <span class="meta muted">${esc(r.submitted_by || "")} · ${rel(r.created_at)}${r.screenshot ? " · 📷" : ""}</span>
+      </div>
+      ${r.id === state.openReport ? reportDetail(r) : ""}
+    </div>`).join("");
+  document.querySelectorAll(".report .rhead").forEach((el) => {
+    el.onclick = () => {
+      const id = el.parentNode.dataset.id;
+      state.openReport = state.openReport === id ? null : id;
+      renderReports(state.reportsCache);
+    };
+  });
+}
+
 async function refresh() {
   if (!$("live").checked) return;
   try {
-    const [ov, runs, feed, jobs] = await Promise.all([
+    const [ov, runs, feed, jobs, reports] = await Promise.all([
       api("GET", "/api/overview"),
       api("GET", "/api/runs"),
       api("GET", `/api/events?since_ts=${state.lastFeedTs}`),
       api("GET", "/api/jobs"),
+      api("GET", "/api/reports"),
     ]);
     renderStats(ov); renderRuns(runs.runs); renderFeed(feed.events); renderJobs(jobs.jobs);
+    state.reportsCache = reports.reports; renderReports(state.reportsCache);
     if (state.selected && runs.runs.some((r) => r.run_id === state.selected && r.in_flight))
       selectRun(state.selected);
   } catch (e) { /* server momentarily busy; next tick */ }

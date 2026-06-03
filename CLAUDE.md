@@ -56,6 +56,7 @@ py -m polis run [--real] [--parallel N] [--architects N] [--constitution-court] 
 py -m polis record --tail 30 | runs | status     # read the audit log / runs / summary
 py -m polis dashboard --no-browser               # web control panel (needs the dashboard extra)
 py -m polis config --repo <path>                 # set the target repo Polis develops (else <base>/workspace)
+py -m polis config --testing-mode on             # inject the tester feedback widget (Clerk + reports)
 ```
 
 ## Code standards

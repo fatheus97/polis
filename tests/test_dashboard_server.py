@@ -11,6 +11,7 @@ from pathlib import Path
 
 try:
     import httpx  # noqa: F401  (TestClient needs it)
+    import multipart  # noqa: F401  (Form/UploadFile need python-multipart)
     from fastapi.testclient import TestClient
 
     from polis.dashboard.server import create_app
@@ -70,6 +71,64 @@ class DashboardServerTest(unittest.TestCase):
         c = self.client.post("/api/config", json={"workspace": target}).json()
         self.assertFalse(c["managed_default"])
         self.assertIn(Path(target).name, c["workspace"])
+
+    def test_report_intake_creates_report_and_feedback(self):
+        self.client.post("/api/config", json={"ticketizer": False})  # immediate feedback (no Clerk)
+        r = self.client.post("/api/report-intake",
+                             data={"text": "save button broken", "state": '{"url":"http://x/"}'})
+        self.assertEqual(r.status_code, 200)
+        j = r.json()
+        self.assertTrue(j["report_id"] and j["feedback_id"])
+        reports = self.client.get("/api/reports").json()["reports"]
+        self.assertEqual([rp["text"] for rp in reports], ["save button broken"])
+        pend = self.client.get("/api/feedback").json()["pending"]
+        self.assertTrue(any(p["directives"].get("report_id") == j["report_id"] for p in pend))
+
+    def test_report_intake_with_screenshot_roundtrips(self):
+        self.client.post("/api/config", json={"ticketizer": False})  # no Clerk LLM call
+        png = b"\x89PNG\r\n\x1a\n" + b"imgbytes"
+        r = self.client.post("/api/report-intake", data={"text": "x"},
+                             files={"screenshot": ("s.png", png, "image/png")})
+        rid = r.json()["report_id"]
+        shot = self.client.get(f"/api/reports/{rid}/screenshot")
+        self.assertEqual(shot.status_code, 200)
+        self.assertEqual(shot.content, png)
+
+    def test_report_intake_rejects_oversized_screenshot(self):
+        big = b"x" * (4 * 1024 * 1024 + 1)
+        r = self.client.post("/api/report-intake", data={"text": "x"},
+                             files={"screenshot": ("s.png", big, "image/png")})
+        self.assertEqual(r.status_code, 413)
+
+    def test_config_testing_mode_toggle(self):
+        self.assertFalse(self.client.get("/api/config").json()["testing_mode"])
+        self.client.post("/api/config", json={"testing_mode": True})
+        self.assertTrue(self.client.get("/api/config").json()["testing_mode"])
+
+    def test_unknown_report_404(self):
+        self.assertEqual(self.client.get("/api/reports/nope").status_code, 404)
+
+    def test_widget_js_templated_with_intake_url(self):
+        from polis.projectcfg import write_config
+        write_config(self.base, {"intake_url": "http://host:8765/api/report-intake"})
+        js = self.client.get("/static/feedback-widget.js")
+        self.assertEqual(js.status_code, 200)
+        self.assertIn("__POLIS_INTAKE_URL", js.text)
+        self.assertIn("http://host:8765/api/report-intake", js.text)
+
+    def test_cors_preflight_on_intake(self):
+        r = self.client.options("/api/report-intake",
+                                headers={"Origin": "http://app.example",
+                                         "Access-Control-Request-Method": "POST"})
+        self.assertIn(r.status_code, (200, 204))
+        self.assertIn("access-control-allow-origin", {k.lower() for k in r.headers})
+
+    def test_cors_not_applied_to_action_endpoints(self):
+        # CORS is scoped to the intake endpoint only — action endpoints get no allow-origin.
+        r = self.client.options("/api/budget",
+                                headers={"Origin": "http://evil.example",
+                                         "Access-Control-Request-Method": "POST"})
+        self.assertNotIn("access-control-allow-origin", {k.lower() for k in r.headers})
 
     def test_events_capped_even_with_since_ts_zero(self):
         # Regression: since_ts=0 must NOT bypass the tail cap and dump the whole record.

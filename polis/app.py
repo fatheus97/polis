@@ -17,7 +17,7 @@ from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
 from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
-from .projectcfg import resolve_main_branch, resolve_workspace
+from .projectcfg import resolve_main_branch, resolve_testing_mode, resolve_workspace
 from .record import Record
 from .registry import ModelTier, Registry
 from .sandbox import LocalSandbox, Sandbox
@@ -110,7 +110,7 @@ def build_government(
     constitution = Constitution.load(constitution_path)
     if agents == "real":
         backend = backend or ClaudeCliBackend()
-        registry = Registry.real(backend, tier)
+        registry = Registry.real(backend, tier, testing_mode=resolve_testing_mode(base))
     else:
         registry = Registry.default()
     run_store = RunStore(base / "runs.sqlite")
@@ -124,6 +124,12 @@ def build_government(
             raise ValueError(f"target repo exists but is not a git repository "
                              f"(refusing to git-init it): {ws_path}")
         workspace = GitWorkspace(ws_path, main_branch=resolve_main_branch(base))
+    # `protect-core` is a path-rule matched against the TARGET repo's relative paths, so it
+    # only makes sense when Polis develops its OWN repo. Drop it for any other workspace so a
+    # user app that merely has a polis/ directory isn't falsely blocked.
+    polis_root = Path(__file__).resolve().parent.parent
+    if Path(getattr(workspace, "path", "") or ".").resolve() != polis_root:
+        constitution.rules = [r for r in constitution.rules if r.id != "protect-core"]
     sandbox = sandbox or LocalSandbox()
     orchestrator = Orchestrator(
         registry=registry, treasury=treasury, record=record, constitution=constitution,

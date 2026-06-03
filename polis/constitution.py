@@ -24,6 +24,7 @@ class Rule:
     severity: str  # "block" (must reject) | "warn" (logged, non-blocking)
     check: str  # "regex" | "manual"
     pattern: str | None = None
+    target: str = "content"  # "content" (scan diff lines) | "path" (match the file path)
 
     def compiled(self):
         return re.compile(self.pattern) if (self.check == "regex" and self.pattern) else None
@@ -49,6 +50,11 @@ class Constitution:
             if rx is None:
                 continue
             for change in diff.changes:
+                if rule.target == "path":
+                    if rx.search(change.path):
+                        violations.append(Violation(rule_id=rule.id, severity=rule.severity,
+                                                    path=change.path, snippet=change.path))
+                    continue
                 for line in change.content.splitlines():
                     if rx.search(line):
                         violations.append(

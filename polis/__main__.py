@@ -97,6 +97,16 @@ def main(argv=None) -> int:
                       help="set the target repo directory Polis develops (the app under work)")
     pcfg.add_argument("--main-branch", default=None,
                       help="set that repo's default branch (default: main)")
+    pcfg.add_argument("--testing-mode", choices=["on", "off"], default=None,
+                      help="show the feedback widget in apps Polis develops (and the dashboard)")
+    pcfg.add_argument("--auto-run", choices=["on", "off"], default=None,
+                      help="auto-trigger a run when a tester report arrives (else queue it)")
+    pcfg.add_argument("--ticketizer", choices=["on", "off"], default=None,
+                      help="distill reports into structured tickets via the Clerk (default on)")
+    pcfg.add_argument("--intake-url", default=None,
+                      help="absolute intake URL baked into the served widget (for external apps)")
+    pcfg.add_argument("--intake-origins", default=None,
+                      help="comma-separated CORS allow-origins for the intake endpoint")
 
     args = p.parse_args(argv)
 
@@ -113,19 +123,31 @@ def main(argv=None) -> int:
                      open_browser=not args.no_browser)
 
     if args.cmd == "config":
-        from .projectcfg import (is_managed_default, resolve_main_branch,
-                                 resolve_workspace, write_config)
+        from .projectcfg import (is_managed_default, resolve_auto_run,
+                                 resolve_main_branch, resolve_testing_mode,
+                                 resolve_ticketizer, resolve_workspace, write_config)
         updates = {}
         if args.repo is not None:
             # "" clears it (reset to managed default); avoid Path("").resolve() == CWD.
             updates["workspace"] = str(Path(args.repo).resolve()) if args.repo.strip() else ""
         if args.main_branch is not None:
             updates["main_branch"] = args.main_branch
+        for flag, val in (("testing_mode", args.testing_mode), ("auto_run", args.auto_run),
+                          ("ticketizer", args.ticketizer)):
+            if val is not None:
+                updates[flag] = (val == "on")
+        if args.intake_url is not None:
+            updates["intake_url"] = args.intake_url.strip()
+        if args.intake_origins is not None:
+            updates["intake_origins"] = [o.strip() for o in args.intake_origins.split(",") if o.strip()]
         if updates:
             write_config(args.base, updates)
         tag = "managed default" if is_managed_default(args.base) else "configured"
-        print(f"target repo : {resolve_workspace(args.base)}  ({tag})")
-        print(f"main branch : {resolve_main_branch(args.base)}")
+        print(f"target repo  : {resolve_workspace(args.base)}  ({tag})")
+        print(f"main branch  : {resolve_main_branch(args.base)}")
+        print(f"testing_mode : {resolve_testing_mode(args.base)}   "
+              f"auto_run : {resolve_auto_run(args.base)}   "
+              f"ticketizer : {resolve_ticketizer(args.base)}")
         return 0
 
     config = None
