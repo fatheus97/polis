@@ -10,6 +10,11 @@ requires-python = ">=3.10"
 # integration in later phases will add dependencies here.
 dependencies = []
 
+# The web dashboard is an OPTIONAL extra so the core stays standard-library only.
+# Install with:  pip install -e '.[dashboard]'
+[project.optional-dependencies]
+dashboard = ["fastapi>=0.110", "uvicorn>=0.27"]
+
 [project.scripts]
 polis = "polis.__main__:main"
 
@@ -18,4 +23,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["polis", "polis.agents"]
+packages = ["polis", "polis.agents", "polis.dashboard"]
+
+[tool.setuptools.package-data]
+"polis.dashboard" = ["static/*"]

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Polis · dashboard</title>
+  <link rel="stylesheet" href="/static/pico.min.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">⚖&#xFE0E; <strong>Polis</strong> <span class="muted" id="base"></span></div>
+    <div class="stats" id="stats"></div>
+    <label class="live"><input type="checkbox" id="live" checked /> live</label>
+  </header>
+
+  <main class="grid">
+    <section class="col left">
+      <article class="panel">
+        <header>Runs <span id="runcount" class="muted"></span></header>
+        <div id="runs" class="runs"><p class="muted">No runs yet.</p></div>
+      </article>
+
+      <article class="panel">
+        <header>Control panel</header>
+        <form id="budgetForm" class="row">
+          <input type="number" id="budgetAmount" placeholder="fund amount" step="1" min="1" />
+          <button type="submit">Fund</button>
+        </form>
+        <form id="feedbackForm">
+          <textarea id="feedbackText" rows="2" placeholder="feedback for the architect…"></textarea>
+          <div class="row">
+            <input id="feedbackDirectives" placeholder='directives JSON (optional)' />
+            <button type="submit">Submit</button>
+          </div>
+        </form>
+        <form id="runForm" class="run-row">
+          <label class="chk"><input type="checkbox" id="runReal" /> real <span class="muted">($)</span></label>
+          <label class="chk" title="architects (panel size)">arch
+            <input type="number" id="runArchitects" value="1" min="1" /></label>
+          <label class="chk"><input type="checkbox" id="runCourt" /> court</label>
+          <button type="submit">Run next</button>
+        </form>
+        <p class="muted" style="font-size:.72rem;margin:.1rem 0 .4rem">
+          Stub runs cost no API money but still debit the treasury.</p>
+        <div id="jobs" class="jobs"></div>
+      </article>
+    </section>
+
+    <section class="col right">
+      <article class="panel" id="detailPanel">
+        <header id="detailHeader">Select a run to see its timeline</header>
+        <div id="detail"></div>
+      </article>
+
+      <article class="panel">
+        <header>Activity feed</header>
+        <div id="feed" class="feed"></div>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

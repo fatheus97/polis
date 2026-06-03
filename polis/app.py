@@ -77,6 +77,15 @@ class Government:
             self.inbox.mark_processed(it.id, out[it.id].run_id)
         return [out[it.id] for it in items]
 
+    def close(self) -> None:
+        """Close the SQLite-backed stores. Important on Windows, where unclosed
+        handles can block deleting temp workspaces."""
+        for store in (self.treasury, self.run_store, self.inbox):
+            try:
+                store.close()
+            except Exception:
+                pass
+
 
 def build_government(
     base_dir: str | Path = ".polis",
