@@ -188,7 +188,8 @@ class DashboardRunFlowTest(unittest.TestCase):
             time.sleep(0.3)
         self.assertEqual(j["status"], "done", j)
         runs = self.client.get("/api/runs").json()["runs"]
-        self.assertTrue(any("beta task" in (r.get("feedback_text") or "") for r in runs), runs)
+        self.assertEqual(len(runs), 1, runs)  # ONLY the targeted item ran (alpha untouched)
+        self.assertIn("beta task", runs[0].get("feedback_text") or "")
 
 
 if __name__ == "__main__":

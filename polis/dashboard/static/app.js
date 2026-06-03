@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { selected: null, lastFeedTs: 0, openReport: null, reportsCache: [] };
+const state = { selected: null, lastFeedTs: 0, openReport: null, reportsCache: [], pendingIds: new Set() };
 
 async function api(method, path, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
@@ -154,7 +154,10 @@ function reportDetail(r) {
     h += `<div class="muted">distilling ticket…</div>`;
   }
   if (r.ticket_error) h += `<div class="muted">clerk error: ${esc(r.ticket_error)}</div>`;
-  if (r.feedback_id) h += `<button class="runticket" data-fb="${esc(r.feedback_id)}">▶ Run this ticket</button>`;
+  if (r.feedback_id && state.pendingIds.has(r.feedback_id))
+    h += `<button class="runticket" data-fb="${esc(r.feedback_id)}">▶ Run this ticket</button>`;
+  else if (r.feedback_id)
+    h += `<div class="muted">✓ ticket already queued or run</div>`;
   h += `<details><summary class="muted">captured state</summary><pre class="state">${esc(JSON.stringify(r.state || {}, null, 2))}</pre></details>`;
   h += `<p class="muted">${esc(r.url || "")} · ${r.feedback_id ? "feedback " + esc(r.feedback_id) : "no feedback item — distilling or Clerk off"}</p>`;
   return `<div class="rdetail">${h}</div>`;
@@ -185,13 +188,15 @@ function renderReports(list) {
 async function refresh() {
   if (!$("live").checked) return;
   try {
-    const [ov, runs, feed, jobs, reports] = await Promise.all([
+    const [ov, runs, feed, jobs, reports, feedback] = await Promise.all([
       api("GET", "/api/overview"),
       api("GET", "/api/runs"),
       api("GET", `/api/events?since_ts=${state.lastFeedTs}`),
       api("GET", "/api/jobs"),
       api("GET", "/api/reports"),
+      api("GET", "/api/feedback"),
     ]);
+    state.pendingIds = new Set((feedback.pending || []).map((p) => p.id));
     renderStats(ov); renderRuns(runs.runs); renderFeed(feed.events); renderJobs(jobs.jobs);
     state.reportsCache = reports.reports; renderReports(state.reportsCache);
     if (state.selected && runs.runs.some((r) => r.run_id === state.selected && r.in_flight))

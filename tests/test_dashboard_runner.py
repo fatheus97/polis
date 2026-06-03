@@ -93,7 +93,7 @@ class ClerkFlowTest(unittest.TestCase):
         deadline = time.time() + 20
         while time.time() < deadline:
             r = store.get(out["report_id"])
-            if r and r["ticket_status"] in ("done", "error"):
+            if r and r["feedback_id"]:  # the LAST write in the job — avoids a status/feedback race
                 break
             time.sleep(0.1)
         self.assertEqual(r["ticket_status"], "done", r)
@@ -120,7 +120,7 @@ class ClerkFlowTest(unittest.TestCase):
         deadline = time.time() + 20
         while time.time() < deadline:
             r = store.get(out["report_id"])
-            if r and r["ticket_status"] in ("done", "error"):
+            if r and r["feedback_id"]:  # the LAST write in the job — avoids a status/feedback race
                 break
             time.sleep(0.1)
         self.assertEqual(r["ticket_status"], "error", r)
@@ -131,7 +131,7 @@ class ClerkFlowTest(unittest.TestCase):
     def test_auto_run_triggers_a_real_run(self):
         # with auto_run on, a distilled ticket must kick off a REAL run (not a stub).
         from polis import projectcfg
-        projectcfg.write_config(self.base, {"auto_run": True})
+        projectcfg.write_config(self.base, {"auto_run": True, "ticketizer": True})
         calls = []
         self.rm.trigger_run = lambda **kw: (calls.append(kw), {"job_id": "j"})[1]
 
