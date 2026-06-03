@@ -4,7 +4,8 @@ Triggering a run from a browser is the risky part: a real run takes minutes and 
 money. So:
   * runs execute on a SINGLE-worker pool (serialized — the browser can't spawn chaos);
   * trigger_run() returns a job_id IMMEDIATELY (never blocks the HTTP request);
-  * the default is STUB (free); a real run requires the caller to have confirmed;
+  * real-vs-stub is a config decision (`real_runs`, default real) — NOT a per-request
+    field — so the choice is deliberate and lives in one place;
   * the Treasury still hard-gates spend (the orchestrator ESCALATEs when out of funds).
 
 FeedbackInbox is main-thread-only (check_same_thread=True). We never share one inbox
@@ -100,7 +101,7 @@ class RunManager:
 
     def _clerk_job(self, report_id, submitted_by):
         from ..reports import ReportStore
-        from ..projectcfg import resolve_auto_run
+        from ..projectcfg import resolve_auto_run, resolve_real_runs
         store = ReportStore(self.base)
         try:
             from ..clerk import distill_report, ticket_to_text
@@ -120,9 +121,9 @@ class RunManager:
             store.set_feedback_id(report_id, fb["id"])
             if resolve_auto_run(self.base):
                 # auto_run is the "fully autonomous" path: a distilled ticket kicks off a
-                # REAL run that actually implements the fix (a stub run would be pointless).
-                # It's opt-in (default off) and bounded by the Treasury.
-                self.trigger_run(real=True, feedback_id=fb["id"], opts={})
+                # run that implements the fix. Real-vs-stub follows the real_runs config
+                # (default real). Opt-in (default off) and bounded by the Treasury.
+                self.trigger_run(real=resolve_real_runs(self.base), feedback_id=fb["id"], opts={})
         except Exception as e:  # the Clerk worker must never die
             # Don't let a Clerk failure (e.g. the claude CLI being unavailable on a fresh
             # install) swallow the report: mark the ticket errored, then STILL file a bare

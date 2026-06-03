@@ -54,9 +54,11 @@ class DashboardServerTest(unittest.TestCase):
         pend = self.client.get("/api/feedback").json()["pending"]
         self.assertEqual([p["text"] for p in pend], ["do x"])
 
-    def test_real_run_requires_confirm(self):
-        r = self.client.post("/api/run", json={"real": True, "confirm": False})
-        self.assertEqual(r.status_code, 400)
+    def test_real_runs_config_default_on_and_toggles(self):
+        # Real-vs-stub is a config switch (default on), not a UI/request field.
+        self.assertTrue(self.client.get("/api/config").json()["real_runs"])
+        self.client.post("/api/config", json={"real_runs": False})
+        self.assertFalse(self.client.get("/api/config").json()["real_runs"])
 
     def test_unknown_run_detail_404(self):
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
@@ -146,6 +148,7 @@ class DashboardRunFlowTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(tempfile.mkdtemp(prefix="polis-srvflow-"))
         self.client = TestClient(create_app(self.base))
+        self.client.post("/api/config", json={"real_runs": False})  # free stub runs in tests
 
     def test_trigger_stub_run_is_nonblocking_and_appears(self):
         self.client.post("/api/budget", json={"amount": 1000})

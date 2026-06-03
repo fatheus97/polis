@@ -77,6 +77,12 @@ def resolve_ticketizer(base) -> bool:
     return bool(read_config(base).get("ticketizer", True))
 
 
+def resolve_real_runs(base) -> bool:
+    """Whether dashboard-triggered runs (manual + auto_run) use REAL LLM agents.
+    Real is the default; switch to free stub runs only via config (no UI toggle)."""
+    return bool(read_config(base).get("real_runs", True))
+
+
 def resolve_intake_url(base) -> str:
     """Absolute intake URL baked into the served widget for cross-origin apps
     (empty => the widget posts same-origin to /api/report-intake)."""

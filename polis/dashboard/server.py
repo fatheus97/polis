@@ -18,9 +18,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..projectcfg import (is_managed_default, resolve_auto_run, resolve_intake_origins,
-                          resolve_intake_url, resolve_main_branch, resolve_testing_mode,
-                          resolve_ticketizer, resolve_workspace, write_config)
+from ..projectcfg import (is_managed_default, read_config, resolve_auto_run,
+                          resolve_intake_origins, resolve_intake_url, resolve_main_branch,
+                          resolve_real_runs, resolve_testing_mode, resolve_ticketizer,
+                          resolve_workspace, write_config)
 from ..reports import ReportStore
 from . import data, reader
 from .runner import RunManager
@@ -44,8 +45,7 @@ class BudgetIn(BaseModel):
 
 
 class RunIn(BaseModel):
-    real: bool = False
-    confirm: bool = False
+    # real-vs-stub is a config switch (real_runs), not a request field
     feedback_id: str | None = None
     max_revisions: int = 2
     architects: int = 1
@@ -58,6 +58,7 @@ class ConfigIn(BaseModel):
     testing_mode: bool | None = None
     auto_run: bool | None = None
     ticketizer: bool | None = None
+    real_runs: bool | None = None
 
 
 def create_app(base) -> FastAPI:
@@ -193,7 +194,8 @@ def create_app(base) -> FastAPI:
                 "managed_default": is_managed_default(base),
                 "testing_mode": resolve_testing_mode(base),
                 "auto_run": resolve_auto_run(base),
-                "ticketizer": resolve_ticketizer(base)}
+                "ticketizer": resolve_ticketizer(base),
+                "real_runs": resolve_real_runs(base)}
 
     @app.get("/api/config")
     def get_config():
@@ -224,11 +226,10 @@ def create_app(base) -> FastAPI:
 
     @app.post("/api/run")
     def post_run(body: RunIn):
-        if body.real and not body.confirm:
-            raise HTTPException(400, "real runs require confirm=true (they cost money)")
+        # Real-vs-stub is a config decision (real_runs, default on), NOT a UI/request toggle.
         opts = {"max_revisions": body.max_revisions, "architects": body.architects,
                 "constitution_court": body.constitution_court}
-        return rm.trigger_run(real=body.real, feedback_id=body.feedback_id, opts=opts)
+        return rm.trigger_run(real=resolve_real_runs(base), feedback_id=body.feedback_id, opts=opts)
 
     @app.post("/api/config")
     def set_config(body: ConfigIn):
@@ -238,7 +239,7 @@ def create_app(base) -> FastAPI:
                                     if body.workspace.strip() else "")
         if body.main_branch is not None:
             updates["main_branch"] = body.main_branch
-        for flag in ("testing_mode", "auto_run", "ticketizer"):
+        for flag in ("testing_mode", "auto_run", "ticketizer", "real_runs"):
             v = getattr(body, flag)
             if v is not None:
                 updates[flag] = bool(v)
@@ -270,6 +271,11 @@ def serve(base, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = 
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     print(f"Polis dashboard → {url}  (base: {Path(base).resolve()})")
+    # One-time heads-up: real-vs-stub defaults to REAL. Only warn when it isn't explicitly
+    # set in config, so a user who has made a deliberate choice isn't nagged.
+    if "real_runs" not in read_config(base) and resolve_real_runs(base):
+        print("  ⚠ dashboard runs use REAL LLM agents by default ($). Switch to free "
+              "stubs:  py -m polis --base <base> config --real-runs off")
     try:
         uvicorn.run(app, host=host, port=port, log_level="warning")
     except OSError as e:
