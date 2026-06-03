@@ -63,6 +63,8 @@ class ConfiguredRepoTest(unittest.TestCase):
         from polis.app import build_government
         base = Path(tempfile.mkdtemp(prefix="polis-cfg-"))
         target = Path(tempfile.mkdtemp(prefix="polis-app-")) / "myapp"
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, target.parent, ignore_errors=True)
         projectcfg.write_config(base, {"workspace": str(target)})
         gov = build_government(base)
         try:
@@ -74,6 +76,8 @@ class ConfiguredRepoTest(unittest.TestCase):
         from polis.app import build_government
         base = Path(tempfile.mkdtemp(prefix="polis-cfg-"))
         target = Path(tempfile.mkdtemp(prefix="polis-app-")) / "app"
+        self.addCleanup(shutil.rmtree, base, ignore_errors=True)
+        self.addCleanup(shutil.rmtree, target.parent, ignore_errors=True)
         projectcfg.write_config(base, {"workspace": str(target)})
         gov = build_government(base)
         try:
