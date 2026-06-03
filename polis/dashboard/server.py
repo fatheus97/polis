@@ -16,6 +16,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ..projectcfg import (is_managed_default, resolve_main_branch,
+                          resolve_workspace, write_config)
 from . import data, reader
 from .runner import RunManager
 
@@ -41,6 +43,11 @@ class RunIn(BaseModel):
     max_revisions: int = 2
     architects: int = 1
     constitution_court: bool = False
+
+
+class ConfigIn(BaseModel):
+    workspace: str | None = None   # "" resets to the managed default
+    main_branch: str | None = None
 
 
 def create_app(base) -> FastAPI:
@@ -105,6 +112,15 @@ def create_app(base) -> FastAPI:
     def feedback():
         return {"pending": reader.read_pending_feedback(base)}
 
+    def _config_view():
+        return {"workspace": str(resolve_workspace(base)),
+                "main_branch": resolve_main_branch(base),
+                "managed_default": is_managed_default(base)}
+
+    @app.get("/api/config")
+    def get_config():
+        return _config_view()
+
     @app.get("/api/jobs")
     def jobs():
         return {"jobs": rm.jobs()}
@@ -135,6 +151,17 @@ def create_app(base) -> FastAPI:
         opts = {"max_revisions": body.max_revisions, "architects": body.architects,
                 "constitution_court": body.constitution_court}
         return rm.trigger_run(real=body.real, feedback_id=body.feedback_id, opts=opts)
+
+    @app.post("/api/config")
+    def set_config(body: ConfigIn):
+        updates = {}
+        if body.workspace is not None:
+            updates["workspace"] = (str(Path(body.workspace).resolve())
+                                    if body.workspace.strip() else "")
+        if body.main_branch is not None:
+            updates["main_branch"] = body.main_branch
+        write_config(base, updates)
+        return _config_view()
 
     if static.exists():
         app.mount("/static", StaticFiles(directory=str(static)), name="static")

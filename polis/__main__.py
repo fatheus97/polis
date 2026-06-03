@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .app import build_government
 from .llm import ClaudeCliBackend
@@ -76,6 +77,8 @@ def main(argv=None) -> int:
                          "is cross-tier, not cross-provider)")
     pr.add_argument("--deploy", default=None,
                     help="shell command to run against merged main after a successful merge")
+    pr.add_argument("--repo", default=None,
+                    help="target repo to develop for this run (overrides the configured one)")
 
     prec = sub.add_parser("record", help="read the audit log (the Record)")
     prec.add_argument("--tail", type=int, default=20)
@@ -88,6 +91,12 @@ def main(argv=None) -> int:
     pd.add_argument("--host", default="127.0.0.1")
     pd.add_argument("--port", type=int, default=8765)
     pd.add_argument("--no-browser", action="store_true", help="don't auto-open a browser")
+
+    pcfg = sub.add_parser("config", help="show or set project config (e.g. the target repo)")
+    pcfg.add_argument("--repo", default=None,
+                      help="set the target repo directory Polis develops (the app under work)")
+    pcfg.add_argument("--main-branch", default=None,
+                      help="set that repo's default branch (default: main)")
 
     args = p.parse_args(argv)
 
@@ -102,6 +111,21 @@ def main(argv=None) -> int:
             return 1
         return serve(args.base, host=args.host, port=args.port,
                      open_browser=not args.no_browser)
+
+    if args.cmd == "config":
+        from .projectcfg import (is_managed_default, resolve_main_branch,
+                                 resolve_workspace, write_config)
+        updates = {}
+        if args.repo is not None:
+            updates["workspace"] = str(Path(args.repo).resolve())
+        if args.main_branch is not None:
+            updates["main_branch"] = args.main_branch
+        if updates:
+            write_config(args.base, updates)
+        tag = "managed default" if is_managed_default(args.base) else "configured"
+        print(f"target repo : {resolve_workspace(args.base)}  ({tag})")
+        print(f"main branch : {resolve_main_branch(args.base)}")
+        return 0
 
     config = None
     build_kwargs = {}
@@ -127,6 +151,8 @@ def main(argv=None) -> int:
             build_kwargs.update(agents="real", backend=backend, tier=tier)
         build_kwargs["sandbox"] = (DockerSandbox() if args.sandbox == "docker"
                                    else LocalSandbox())
+        if args.repo:
+            build_kwargs["workspace_dir"] = args.repo
     gov = build_government(args.base, config=config, **build_kwargs)
 
     if args.cmd == "budget":

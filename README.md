@@ -103,6 +103,14 @@ py -m pip install -e ".[dashboard]"
 py -m polis --base .polis-real dashboard      # opens http://127.0.0.1:8765
 ```
 
+By default Polis develops a managed repo at `<base>/workspace`. To point it at **your own
+app's repo** (the agents will branch, commit, and merge into it), set the target — via the CLI
+or the dashboard's control panel:
+
+```powershell
+py -m polis --base .polis-real config --repo C:\path\to\your-app   # --main-branch master if needed
+```
+
 ## Roadmap
 
 - **Phase 0** ✅ — deterministic skeleton + stub agents.

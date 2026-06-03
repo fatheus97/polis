@@ -176,5 +176,23 @@ $("runForm").onsubmit = async (e) => {
   } catch (err) { toast(err.message); }
 };
 
+async function loadConfig() {
+  try {
+    const c = await api("GET", "/api/config");
+    $("repoCurrent").textContent = `target repo: ${c.workspace}` +
+      (c.managed_default ? "  (managed default)" : `  (configured · ${c.main_branch})`);
+  } catch (e) { /* ignore */ }
+}
+$("repoForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const ws = $("repoPath").value.trim();
+  if (ws && !confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
+  try {
+    await api("POST", "/api/config", { workspace: ws });
+    $("repoPath").value = ""; toast("Target repo set."); loadConfig();
+  } catch (err) { toast(err.message); }
+};
+
+loadConfig();
 refresh();
 setInterval(refresh, 2500);

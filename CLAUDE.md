@@ -55,6 +55,7 @@ py -m polis submit "..."                         # add feedback
 py -m polis run [--real] [--parallel N] [--architects N] [--constitution-court] [--sandbox docker] [--decorrelate] [--deploy "<cmd>"]
 py -m polis record --tail 30 | runs | status     # read the audit log / runs / summary
 py -m polis dashboard --no-browser               # web control panel (needs the dashboard extra)
+py -m polis config --repo <path>                 # set the target repo Polis develops (else <base>/workspace)
 ```
 
 ## Code standards
