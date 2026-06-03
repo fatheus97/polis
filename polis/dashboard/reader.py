@@ -15,6 +15,9 @@ from pathlib import Path
 
 
 def read_record_events(path, *, tail: int | None = None) -> list[dict]:
+    # NOTE: reads the whole file each call — O(record size). Fine for a local dev
+    # dashboard polling a single base; if the Record grows to months of runs, switch
+    # to a tail-seek byte reader or an mtime-keyed cache. TODO when that becomes real.
     p = Path(path)
     if not p.exists():
         return []

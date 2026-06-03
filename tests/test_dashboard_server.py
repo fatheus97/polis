@@ -60,6 +60,16 @@ class DashboardServerTest(unittest.TestCase):
     def test_unknown_run_detail_404(self):
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
 
+    def test_events_capped_even_with_since_ts_zero(self):
+        # Regression: since_ts=0 must NOT bypass the tail cap and dump the whole record.
+        from polis.models import Stage
+        from polis.record import Record
+        rec = Record(self.base / "record.jsonl")
+        for i in range(50):
+            rec.append(run_id="r1", stage=Stage.INTAKE, actor="procedure", kind="intake", i=i)
+        evs = self.client.get("/api/events?since_ts=0&tail=10").json()["events"]
+        self.assertLessEqual(len(evs), 10)
+
 
 @unittest.skipUnless(HAVE_FASTAPI and HAVE_GIT, "needs the dashboard extra + git")
 class DashboardRunFlowTest(unittest.TestCase):

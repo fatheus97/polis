@@ -61,22 +61,22 @@ function payloadSummary(kind, p) {
   p = p || {};
   switch (kind) {
     case "intake": return esc(p.text || "");
-    case "prd": return `PRD “${esc(p.title)}” (rev ${p.revision ?? 0})`;
-    case "proposal": return `#${p.index} “${esc(p.title)}”`;
-    case "vote": return `voter ${p.voter} → #${p.choice}`;
-    case "elected": return `winner #${p.winner} · tally ${JSON.stringify(p.tally)}`;
+    case "prd": return `PRD “${esc(p.title)}” (rev ${esc(p.revision ?? 0)})`;
+    case "proposal": return `#${esc(p.index)} “${esc(p.title)}”`;
+    case "vote": return `voter ${esc(p.voter)} → #${esc(p.choice)}`;
+    case "elected": return `winner #${esc(p.winner)} · tally ${esc(JSON.stringify(p.tally))}`;
     case "ruling": return `${p.constitutional ? "constitutional ✓" : "unconstitutional ✗"}${p.reasons ? " · " + esc((p.reasons || []).join("; ")) : ""}`;
-    case "amend": return `amended → rev ${p.revision}`;
+    case "amend": return `amended → rev ${esc(p.revision)}`;
     case "hire": return `dev: ${esc(p.discipline || "generalist")}`;
-    case "diff": return `attempt ${p.attempt} · ${(p.files || []).map(esc).join(", ")}`;
+    case "diff": return `attempt ${esc(p.attempt)} · ${(p.files || []).map(esc).join(", ")}`;
     case "test_result": return p.passed ? "tests passed ✓" : "tests failed ✗";
     case "verdict": return `${p.approved ? "approved ✓" : "rejected ✗"}${(p.reasons || []).length ? " · " + esc(p.reasons.join("; ")) : ""}`;
-    case "revise": return `→ attempt ${p.attempt}: ${esc(p.feedback || "")}`;
-    case "merge": return `merged ${short(p.commit, 10)}`;
+    case "revise": return `→ attempt ${esc(p.attempt)}: ${esc(p.feedback || "")}`;
+    case "merge": return `merged ${esc(short(p.commit, 10))}`;
     case "deploy": return `deploy ${p.ok ? "ok" : "FAILED"}`;
     case "escalate": return `⚠ ${esc(p.reason || "")}`;
     case "spawn": case "release": return `${esc(p.role || "")}`;
-    case "done": return `done ${short(p.commit, 10)}`;
+    case "done": return `done ${esc(short(p.commit, 10))}`;
     default: return esc(JSON.stringify(p)).slice(0, 200);
   }
 }

@@ -35,6 +35,12 @@ def _cost(event: dict) -> float:
     return float(event.get("cost") or 0.0)
 
 
+def _pl(event: dict | None) -> dict:
+    """Payload of an event, tolerant of a missing/None `payload` key (the reader can
+    hand us loosely-shaped events)."""
+    return (event or {}).get("payload") or {}
+
+
 def group_by_run(events: list[dict]) -> dict[str, list[dict]]:
     """Group events by run_id, preserving append order within each run."""
     groups: dict[str, list[dict]] = {}
@@ -57,37 +63,37 @@ def run_summary(run_events: list[dict]) -> dict:
     outcome = "DONE" if done else ("ESCALATE" if esc else None)
 
     intake = _first(evs, "intake")
-    feedback_id = intake["payload"].get("feedback_id") if intake else None
-    feedback_text = intake["payload"].get("text") if intake else None
+    feedback_id = _pl(intake).get("feedback_id")
+    feedback_text = _pl(intake).get("text")
 
     # PRD title: single-architect `prd`, else the winning panel `proposal`.
     prd_title = prd_id = None
     prd_ev = _first(evs, "prd")
     if prd_ev:
-        prd_title = prd_ev["payload"].get("title")
-        prd_id = prd_ev["payload"].get("prd_id")
+        prd_title = _pl(prd_ev).get("title")
+        prd_id = _pl(prd_ev).get("prd_id")
     else:
         elected = _first(evs, "elected")
         if elected:
-            prd_id = elected["payload"].get("prd_id")
-            winner = elected["payload"].get("winner")
+            prd_id = _pl(elected).get("prd_id")
+            winner = _pl(elected).get("winner")
             win = next((e for e in evs if e.get("kind") == "proposal"
-                        and e["payload"].get("index") == winner), None)
+                        and _pl(e).get("index") == winner), None)
             if win:
-                prd_title = win["payload"].get("title")
+                prd_title = _pl(win).get("title")
 
     hire = _first(evs, "hire")
-    discipline = hire["payload"].get("discipline") if hire else None
+    discipline = _pl(hire).get("discipline")
 
     merge = _first(evs, "merge")
-    merge_commit = (merge["payload"].get("commit") if merge
-                    else (done["payload"].get("commit") if done else None))
+    merge_commit = (_pl(merge).get("commit") if merge
+                    else (_pl(done).get("commit") if done else None))
 
-    attempt_idxs = [e["payload"].get("attempt", 0) for e in evs
+    attempt_idxs = [_pl(e).get("attempt", 0) for e in evs
                     if e.get("kind") in ("diff", "revise")]
     attempts = max(attempt_idxs) if attempt_idxs else 0
 
-    reason = (esc["payload"].get("reason") if esc
+    reason = (_pl(esc).get("reason") if esc
               else ("merged" if done else ""))
 
     return {

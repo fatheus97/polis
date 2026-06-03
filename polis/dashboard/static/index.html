@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Polis · dashboard</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+  <link rel="stylesheet" href="/static/pico.min.css" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -41,6 +41,8 @@
           <label class="chk"><input type="checkbox" id="runCourt" /> court</label>
           <button type="submit">Run next</button>
         </form>
+        <p class="muted" style="font-size:.72rem;margin:.1rem 0 .4rem">
+          Stub runs cost no API money but still debit the treasury.</p>
         <div id="jobs" class="jobs"></div>
       </article>
     </section>

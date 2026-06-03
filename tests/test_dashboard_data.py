@@ -63,6 +63,16 @@ class RunSummaryTest(unittest.TestCase):
         s = data.run_summary(h.events())
         self.assertTrue(s["prd_title"])  # derived from the winning proposal
 
+    def test_tolerates_events_missing_payload(self):
+        # The tolerant reader can hand us loosely-shaped events; never KeyError.
+        events = [
+            {"ts": 1, "run_id": "r1", "stage": "INTAKE", "actor": "procedure", "kind": "intake"},
+            {"ts": 2, "run_id": "r1", "stage": "DONE", "actor": "procedure", "kind": "done"},
+        ]
+        s = data.run_summary(events)
+        self.assertEqual(s["outcome"], "DONE")
+        self.assertIsNone(s["feedback_text"])
+
 
 class BranchAttributionTest(unittest.TestCase):
     def test_branch_from_actor_not_source(self):

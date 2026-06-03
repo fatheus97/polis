@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -44,8 +45,14 @@ class RunIn(BaseModel):
 
 def create_app(base) -> FastAPI:
     base = Path(base)
-    app = FastAPI(title="Polis Dashboard", docs_url="/api/docs")
     rm = RunManager(base)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        rm.shutdown()  # wait=True: let an in-flight run finish, don't corrupt state
+
+    app = FastAPI(title="Polis Dashboard", docs_url="/api/docs", lifespan=lifespan)
     app.state.run_manager = rm
     static = _static_dir()
 
@@ -83,8 +90,9 @@ def create_app(base) -> FastAPI:
     @app.get("/api/events")
     def events(tail: int = Query(100, ge=0, le=2000), since_ts: float | None = None):
         evs = reader.read_record_events(record_path())
-        evs = [e for e in evs if (e.get("ts") or 0) > since_ts] if since_ts is not None \
-            else evs[-tail:]
+        if since_ts is not None:
+            evs = [e for e in evs if (e.get("ts") or 0) > since_ts]
+        evs = evs[-tail:]  # always cap — a stale/zero since_ts must not dump the record
         for e in evs:
             e["branch"] = data.event_branch(e)
         return {"events": evs}

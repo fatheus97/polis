@@ -28,6 +28,7 @@ class RunManager:
         self._write_lock = threading.Lock()                 # serialize inbox/treasury writes
         self._jobs: dict[str, dict] = {}
         self._jobs_lock = threading.Lock()
+        self._max_jobs = 200                                # bound the in-memory history
 
     # --- write actions (called on request threads) -------------------------
     def submit_feedback(self, text: str, by: str = "tester", directives=None) -> dict:
@@ -64,6 +65,8 @@ class RunManager:
                 "feedback_id": feedback_id, "run_id": None, "outcome": None,
                 "reason": None, "error": None,
             }
+            while len(self._jobs) > self._max_jobs:   # bound memory (drop oldest)
+                self._jobs.pop(next(iter(self._jobs)))
         self._executor.submit(self._run_job, job_id, bool(real), feedback_id, opts or {})
         return {"job_id": job_id, "status": "queued"}
 
@@ -78,18 +81,23 @@ class RunManager:
                 constitutional_review=bool(opts.get("constitution_court", False)),
             )
             gov = build_government(self.base, agents="real" if real else "stub", config=cfg)
-            item = None
-            if feedback_id:
-                item = next((it for it in gov.inbox.pending() if it.id == feedback_id), None)
-            else:
-                item = gov.inbox.pop_next()
-            if item is None:
-                self._set(job_id, status="done", reason="no pending feedback")
-                return
-            res = gov.orchestrator.process(item)
-            gov.inbox.mark_processed(item.id, res.run_id)
-            self._set(job_id, status="done", run_id=res.run_id,
-                      outcome=res.outcome.value, reason=res.reason)
+            try:
+                if feedback_id:
+                    item = next((it for it in gov.inbox.pending()
+                                 if it.id == feedback_id), None)
+                else:
+                    item = gov.inbox.pop_next()
+                if item is None:
+                    reason = (f"feedback_id {feedback_id} not in the pending inbox"
+                              if feedback_id else "no pending feedback")
+                    self._set(job_id, status="done", reason=reason)
+                    return
+                res = gov.orchestrator.process(item)
+                gov.inbox.mark_processed(item.id, res.run_id)
+                self._set(job_id, status="done", run_id=res.run_id,
+                          outcome=res.outcome.value, reason=res.reason)
+            finally:
+                gov.close()  # release SQLite handles (Windows file locks)
         except Exception as e:  # never let a job crash the worker
             self._set(job_id, status="error", error=str(e)[:300])
 
@@ -108,5 +116,7 @@ class RunManager:
         with self._jobs_lock:
             return [dict(j) for j in self._jobs.values()]
 
-    def shutdown(self):
-        self._executor.shutdown(wait=False)
+    def shutdown(self, wait: bool = True):
+        # wait=True by default: let an in-flight run finish rather than abandon it
+        # mid-merge / mid-SQLite-write (which would corrupt state).
+        self._executor.shutdown(wait=wait)
