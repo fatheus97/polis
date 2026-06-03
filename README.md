@@ -111,6 +111,20 @@ or the dashboard's control panel:
 py -m polis --base .polis-real config --repo C:\path\to\your-app   # --main-branch master if needed
 ```
 
+### Tester feedback loop (testing mode)
+
+Turn on `testing_mode` and Polis injects a floating **feedback widget** into the app it develops
+(and the dashboard itself). A tester describes an issue, pastes a screenshot, and submits; the
+widget auto-captures console/storage/cookies/url, an async **Clerk** distills it into a structured
+ticket, and it becomes a feedback item the architect works on. Pointed at its own repo, Polis
+develops its own dashboard — and a **constitution rule blocks it from touching its core** (it may
+only edit `polis/dashboard/`, tests, docs).
+
+```powershell
+py -m polis --base .polis-dog config --repo C:\multi_coder --testing-mode on
+py -m polis --base .polis-dog dashboard      # click the 🐞 button to file a report
+```
+
 ## Roadmap
 
 - **Phase 0** ✅ — deterministic skeleton + stub agents.

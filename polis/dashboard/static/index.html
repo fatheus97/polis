@@ -8,6 +8,18 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+  <script>
+    // Dogfood: load the feedback widget on the dashboard itself when testing_mode is on.
+    (function () {
+      fetch("/api/config").then(function (r) { return r.json(); }).then(function (c) {
+        if (c && c.testing_mode) {
+          var s = document.createElement("script");
+          s.src = "/static/feedback-widget.js";
+          document.body.appendChild(s);
+        }
+      }).catch(function () {});
+    })();
+  </script>
   <header class="topbar">
     <div class="brand">⚖&#xFE0E; <strong>Polis</strong> <span class="muted" id="base"></span></div>
     <div class="stats" id="stats"></div>
@@ -64,6 +76,11 @@
       <article class="panel">
         <header>Activity feed</header>
         <div id="feed" class="feed"></div>
+      </article>
+
+      <article class="panel">
+        <header>Tester reports <span id="reportcount" class="muted"></span></header>
+        <div id="reports" class="reports"><p class="muted">No reports yet.</p></div>
       </article>
     </section>
   </main>

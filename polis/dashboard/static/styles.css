@@ -82,3 +82,16 @@ button { padding: .35rem .7rem; margin: 0; }
 .jobs { font-size: .78rem; display: flex; flex-direction: column; gap: .2rem; }
 .toast { position: fixed; bottom: 1rem; right: 1rem; padding: .5rem .8rem; border-radius: 8px;
   background: var(--pico-card-background-color); border: 1px solid var(--b-legislative); }
+
+/* tester reports */
+.reports { display: flex; flex-direction: column; gap: .4rem; max-height: 42vh; overflow: auto; }
+.report { border: 1px solid var(--pico-muted-border-color); border-radius: 8px; }
+.report.open { border-color: var(--b-judicial); }
+.rhead { display: grid; grid-template-columns: auto 1fr auto; gap: .5rem; align-items: center; padding: .45rem .55rem; cursor: pointer; }
+.rhead .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rhead .meta { font-size: .76rem; white-space: nowrap; }
+.rdetail { padding: .2rem .6rem .6rem; display: flex; flex-direction: column; gap: .4rem; }
+.rdetail .shot { max-width: 100%; max-height: 240px; border-radius: 8px; border: 1px solid var(--pico-muted-border-color); }
+.rdetail .ticket { font-size: .85rem; }
+.rdetail .state { font-size: .72rem; max-height: 200px; overflow: auto; background: #0f1320; padding: .4rem; border-radius: 6px; white-space: pre-wrap; word-break: break-word; }
+.rdetail details summary { cursor: pointer; }

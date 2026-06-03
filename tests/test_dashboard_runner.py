@@ -69,5 +69,39 @@ class TriggerRunTest(unittest.TestCase):
         self.assertFalse(runs[0]["in_flight"])
 
 
+class ClerkFlowTest(unittest.TestCase):
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="polis-clerk-"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.rm = RunManager(self.base)
+        from polis.llm import FakeLLM, LLMResponse
+        ticket = ('{"title":"Fix save","description":"save errors","severity":"major",'
+                  '"repro_steps":["click save"]}')
+        self.rm._clerk_backend_factory = lambda: FakeLLM([LLMResponse(text=ticket, cost_usd=0.01)])
+
+    def tearDown(self):
+        self.rm.shutdown()
+
+    def test_ticketizer_distills_then_creates_feedback(self):
+        from polis.reports import ReportStore
+        out = self.rm.intake_report(text="save is broken", state={"console": []})
+        self.assertEqual(out["ticket_status"], "pending")  # non-blocking — deferred to the Clerk
+        self.assertIsNone(out["feedback_id"])
+
+        store = ReportStore(self.base)
+        r = None
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            r = store.get(out["report_id"])
+            if r and r["ticket_status"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+        self.assertEqual(r["ticket_status"], "done", r)
+        self.assertEqual(r["ticket"]["title"], "Fix save")
+        self.assertIsNotNone(r["feedback_id"])
+        pend = reader.read_pending_feedback(self.base)
+        self.assertTrue(any("Fix save" in p["text"] for p in pend))
+
+
 if __name__ == "__main__":
     unittest.main()

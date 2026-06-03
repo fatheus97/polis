@@ -110,17 +110,20 @@ class Registry:
         return reg
 
     @classmethod
-    def real(cls, backend, tier: "ModelTier | None" = None) -> "Registry":
+    def real(cls, backend, tier: "ModelTier | None" = None,
+             testing_mode: bool = False) -> "Registry":
         """The Phase-1 government: real, model-backed officials sharing one backend."""
         from .agents.llm_agents import (ClaudeCodeDev, LLMArchitect,
                                         LLMConstitutionalJudge, LLMReviewer)
         tier = tier or ModelTier()
         reg = cls()
         reg.register(RoleTemplate("architect", Branch.LEGISLATIVE,
-                                  lambda: LLMArchitect(backend, tier.architect),
+                                  lambda: LLMArchitect(backend, tier.architect,
+                                                       testing_mode=testing_mode),
                                   "LLM architect: feedback -> PRD."))
         reg.register(RoleTemplate("dev", Branch.EXECUTIVE,
-                                  lambda: ClaudeCodeDev(backend, tier.dev),
+                                  lambda: ClaudeCodeDev(backend, tier.dev,
+                                                        testing_mode=testing_mode),
                                   "Claude Code dev: PRD -> code edits."))
         reg.register(RoleTemplate("reviewer", Branch.JUDICIAL,
                                   lambda: LLMReviewer(backend, tier.reviewer),
@@ -132,8 +135,9 @@ class Registry:
         def _hire(discipline):
             if discipline:
                 expertise = SPECIALISTS.get(discipline, f"{discipline} engineering")
-                return ClaudeCodeDev(backend, tier.dev, specialty=expertise)
-            return ClaudeCodeDev(backend, tier.dev)
+                return ClaudeCodeDev(backend, tier.dev, specialty=expertise,
+                                     testing_mode=testing_mode)
+            return ClaudeCodeDev(backend, tier.dev, testing_mode=testing_mode)
 
         reg._dev_factory = _hire
         return reg

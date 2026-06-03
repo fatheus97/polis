@@ -17,7 +17,7 @@ from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
 from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
-from .projectcfg import resolve_main_branch, resolve_workspace
+from .projectcfg import resolve_main_branch, resolve_testing_mode, resolve_workspace
 from .record import Record
 from .registry import ModelTier, Registry
 from .sandbox import LocalSandbox, Sandbox
@@ -110,7 +110,7 @@ def build_government(
     constitution = Constitution.load(constitution_path)
     if agents == "real":
         backend = backend or ClaudeCliBackend()
-        registry = Registry.real(backend, tier)
+        registry = Registry.real(backend, tier, testing_mode=resolve_testing_mode(base))
     else:
         registry = Registry.default()
     run_store = RunStore(base / "runs.sqlite")

@@ -50,6 +50,17 @@ DEV_SYSTEM = (
     "When finished, briefly summarize what you changed."
 )
 
+WIDGET_CRITERION = (
+    " Since TESTING_MODE is enabled, also include an acceptance criterion: the web "
+    "deliverable embeds the Polis feedback widget (a <script> to /static/feedback-widget.js "
+    "that loads only under TESTING_MODE), verified by a test."
+)
+WIDGET_INSTRUCTION = (
+    "\nTESTING_MODE is enabled: if this deliverable serves a web UI, the served HTML MUST "
+    "include the Polis feedback widget via <script src=\"/static/feedback-widget.js\"> gated "
+    "to load only under TESTING_MODE, and add a test asserting the widget is referenced."
+)
+
 REVIEWER_SYSTEM = (
     "You are the Judiciary/Reviewer branch. Judge whether a code change correctly and "
     "safely implements its PRD. Be skeptical and DEFAULT TO REJECTION WHEN UNCERTAIN. "
@@ -85,10 +96,12 @@ def _render_diff(diff: Diff, per_file: int = 1500, total: int = 8000) -> str:
 
 
 class LLMArchitect(Architect):
-    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.40):
+    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.40,
+                 testing_mode: bool = False):
         super().__init__("architect", Branch.LEGISLATIVE, cost_estimate)
         self.backend = backend
         self.model = model
+        self.testing_mode = testing_mode
 
     def write_prd(self, feedback, repo_summary="", prior=None, review_feedback=""):
         parts = [f"Tester feedback:\n{feedback.text}"]
@@ -101,7 +114,8 @@ class LLMArchitect(Architect):
                              "Only change the spec if it was ambiguous or wrong; "
                              "otherwise keep it stable.")
         parts.append("\nReturn the PRD as JSON now.")
-        resp = self.backend.complete("\n".join(parts), system=ARCHITECT_SYSTEM,
+        system = ARCHITECT_SYSTEM + (WIDGET_CRITERION if self.testing_mode else "")
+        resp = self.backend.complete("\n".join(parts), system=system,
                                      model=self.model, extra_args=READONLY_ARGS)
         self.last_cost = resp.cost_usd
         revision = (prior.revision + 1) if prior else 0
@@ -141,12 +155,13 @@ class LLMArchitect(Architect):
 class ClaudeCodeDev(Dev):
     def __init__(self, backend: LLMBackend, model: str = "haiku",
                  permission_mode: str = "acceptEdits", cost_estimate: float = 1.50,
-                 specialty: str | None = None):
+                 specialty: str | None = None, testing_mode: bool = False):
         super().__init__("dev", Branch.EXECUTIVE, cost_estimate)
         self.backend = backend
         self.model = model
         self.permission_mode = permission_mode
         self.specialty = specialty
+        self.testing_mode = testing_mode
 
     def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
         if workspace is None:
@@ -154,6 +169,8 @@ class ClaudeCodeDev(Dev):
         system = DEV_SYSTEM
         if self.specialty:
             system += f"\nYou are a specialist in {self.specialty}; apply that expertise."
+        if self.testing_mode:
+            system += WIDGET_INSTRUCTION
         parts = [f"Implement this PRD in the current repository:\n\n{prd.to_markdown()}"]
         if review_feedback:
             parts.append(f"\nThe previous attempt was REJECTED. Address this feedback:\n"

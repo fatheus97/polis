@@ -62,6 +62,33 @@ def resolve_main_branch(base) -> str:
     return read_config(base).get("main_branch", "main")
 
 
+def resolve_testing_mode(base) -> bool:
+    """Whether apps Polis develops (and the dashboard itself) load the feedback widget."""
+    return bool(read_config(base).get("testing_mode", False))
+
+
+def resolve_auto_run(base) -> bool:
+    """Whether a submitted report auto-triggers a run (else it queues for a human click)."""
+    return bool(read_config(base).get("auto_run", False))
+
+
+def resolve_ticketizer(base) -> bool:
+    """Whether the async Clerk distills reports into structured tickets (default on)."""
+    return bool(read_config(base).get("ticketizer", True))
+
+
+def resolve_intake_url(base) -> str:
+    """Absolute intake URL baked into the served widget for cross-origin apps
+    (empty => the widget posts same-origin to /api/report-intake)."""
+    return read_config(base).get("intake_url", "") or ""
+
+
+def resolve_intake_origins(base) -> list:
+    """CORS allow-origins for the intake endpoint (default ['*'] for local dev)."""
+    v = read_config(base).get("intake_origins")
+    return v if isinstance(v, list) and v else ["*"]
+
+
 def is_managed_default(base) -> bool:
     """True when the workspace is the auto-created `<base>/workspace`, not a repo the
     user pointed at."""

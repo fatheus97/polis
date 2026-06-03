@@ -11,15 +11,23 @@ import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+import json
+
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from ..projectcfg import (is_managed_default, resolve_main_branch,
-                          resolve_workspace, write_config)
+from ..projectcfg import (is_managed_default, resolve_auto_run, resolve_intake_origins,
+                          resolve_intake_url, resolve_main_branch, resolve_testing_mode,
+                          resolve_ticketizer, resolve_workspace, write_config)
+from ..reports import ReportStore
 from . import data, reader
 from .runner import RunManager
+
+MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
+_IMG_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
 
 
 def _static_dir() -> Path:
@@ -48,6 +56,9 @@ class RunIn(BaseModel):
 class ConfigIn(BaseModel):
     workspace: str | None = None   # "" resets to the managed default
     main_branch: str | None = None
+    testing_mode: bool | None = None
+    auto_run: bool | None = None
+    ticketizer: bool | None = None
 
 
 def create_app(base) -> FastAPI:
@@ -62,6 +73,9 @@ def create_app(base) -> FastAPI:
     app = FastAPI(title="Polis Dashboard", docs_url="/api/docs", lifespan=lifespan)
     app.state.run_manager = rm
     static = _static_dir()
+    # CORS so a widget embedded in an external app (its own origin) can POST reports.
+    app.add_middleware(CORSMiddleware, allow_origins=resolve_intake_origins(base),
+                       allow_methods=["GET", "POST"], allow_headers=["*"])
 
     def record_path() -> Path:
         return base / "record.jsonl"
@@ -112,10 +126,60 @@ def create_app(base) -> FastAPI:
     def feedback():
         return {"pending": reader.read_pending_feedback(base)}
 
+    # --- tester feedback reports ---
+    @app.get("/api/reports")
+    def reports():
+        return {"reports": rm.reports()}
+
+    @app.get("/api/reports/{report_id}")
+    def one_report(report_id: str):
+        r = rm.report(report_id)
+        if not r:
+            raise HTTPException(404, "report not found")
+        return r
+
+    @app.get("/api/reports/{report_id}/screenshot")
+    def report_screenshot(report_id: str):
+        p = ReportStore(base).screenshot_path(report_id)
+        if not p:
+            raise HTTPException(404, "no screenshot")
+        return FileResponse(p)
+
+    @app.post("/api/report-intake")
+    async def report_intake(
+        text: str = Form(""),
+        state: str = Form("{}"),
+        url: str = Form(""),
+        user_agent: str = Form(""),
+        viewport: str = Form("{}"),
+        submitted_by: str = Form("tester"),
+        screenshot: UploadFile | None = File(None),
+    ):
+        try:
+            state_obj = json.loads(state or "{}")
+            viewport_obj = json.loads(viewport or "{}")
+        except json.JSONDecodeError:
+            raise HTTPException(400, "state/viewport must be JSON")
+        img = ext = None
+        if screenshot is not None:
+            img = await screenshot.read()
+            if img:
+                if len(img) > MAX_SCREENSHOT_BYTES:
+                    raise HTTPException(413, "screenshot too large")
+                ext = _IMG_EXT.get(screenshot.content_type or "")
+                if ext is None:
+                    raise HTTPException(415, "unsupported screenshot type")
+        return rm.intake_report(text=text, submitted_by=submitted_by, url=url,
+                                user_agent=user_agent, viewport=viewport_obj,
+                                state=state_obj, screenshot_bytes=img, screenshot_ext=ext)
+
     def _config_view():
         return {"workspace": str(resolve_workspace(base)),
                 "main_branch": resolve_main_branch(base),
-                "managed_default": is_managed_default(base)}
+                "managed_default": is_managed_default(base),
+                "testing_mode": resolve_testing_mode(base),
+                "auto_run": resolve_auto_run(base),
+                "ticketizer": resolve_ticketizer(base)}
 
     @app.get("/api/config")
     def get_config():
@@ -160,8 +224,25 @@ def create_app(base) -> FastAPI:
                                     if body.workspace.strip() else "")
         if body.main_branch is not None:
             updates["main_branch"] = body.main_branch
+        for flag in ("testing_mode", "auto_run", "ticketizer"):
+            v = getattr(body, flag)
+            if v is not None:
+                updates[flag] = bool(v)
         write_config(base, updates)
         return _config_view()
+
+    # Templated widget: prepend the configured intake URL so external apps can embed
+    # <script src="http://<host>:8765/static/feedback-widget.js">. Declared BEFORE the
+    # StaticFiles mount so this explicit route wins.
+    @app.get("/static/feedback-widget.js")
+    def widget_js():
+        path = static / "feedback-widget.js"
+        if not path.exists():
+            raise HTTPException(404, "widget not found")
+        js = path.read_text(encoding="utf-8")
+        intake = resolve_intake_url(base)
+        header = f"window.__POLIS_INTAKE_URL={json.dumps(intake)};\n" if intake else ""
+        return Response(header + js, media_type="application/javascript")
 
     if static.exists():
         app.mount("/static", StaticFiles(directory=str(static)), name="static")
