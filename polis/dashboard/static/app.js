@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { selected: null, lastFeedTs: 0, openReport: null, reportsCache: [] };
+const state = { selected: null, lastFeedTs: 0, openReport: null, reportsCache: [], pendingIds: new Set() };
 
 async function api(method, path, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
@@ -154,8 +154,12 @@ function reportDetail(r) {
     h += `<div class="muted">distilling ticket…</div>`;
   }
   if (r.ticket_error) h += `<div class="muted">clerk error: ${esc(r.ticket_error)}</div>`;
+  if (r.feedback_id && state.pendingIds.has(r.feedback_id))
+    h += `<button class="runticket" data-fb="${esc(r.feedback_id)}">▶ Run this ticket</button>`;
+  else if (r.feedback_id)
+    h += `<div class="muted">✓ ticket already queued or run</div>`;
   h += `<details><summary class="muted">captured state</summary><pre class="state">${esc(JSON.stringify(r.state || {}, null, 2))}</pre></details>`;
-  h += `<p class="muted">${esc(r.url || "")} · ${r.feedback_id ? "feedback " + esc(r.feedback_id) : "no feedback item"}</p>`;
+  h += `<p class="muted">${esc(r.url || "")} · ${r.feedback_id ? "feedback " + esc(r.feedback_id) : "no feedback item — distilling or Clerk off"}</p>`;
   return `<div class="rdetail">${h}</div>`;
 }
 function renderReports(list) {
@@ -177,18 +181,22 @@ function renderReports(list) {
       renderReports(state.reportsCache);
     };
   });
+  document.querySelectorAll(".report .runticket").forEach((el) =>
+    el.onclick = (ev) => { ev.stopPropagation(); runTicket(el.dataset.fb); });
 }
 
 async function refresh() {
   if (!$("live").checked) return;
   try {
-    const [ov, runs, feed, jobs, reports] = await Promise.all([
+    const [ov, runs, feed, jobs, reports, feedback] = await Promise.all([
       api("GET", "/api/overview"),
       api("GET", "/api/runs"),
       api("GET", `/api/events?since_ts=${state.lastFeedTs}`),
       api("GET", "/api/jobs"),
       api("GET", "/api/reports"),
+      api("GET", "/api/feedback"),
     ]);
+    state.pendingIds = new Set((feedback.pending || []).map((p) => p.id));
     renderStats(ov); renderRuns(runs.runs); renderFeed(feed.events); renderJobs(jobs.jobs);
     state.reportsCache = reports.reports; renderReports(state.reportsCache);
     if (state.selected && runs.runs.some((r) => r.run_id === state.selected && r.in_flight))
@@ -229,7 +237,29 @@ async function loadConfig() {
     const c = await api("GET", "/api/config");
     $("repoCurrent").textContent = `target repo: ${c.workspace}` +
       (c.managed_default ? "  (managed default)" : `  (configured · ${c.main_branch})`);
+    $("cfgTesting").checked = !!c.testing_mode;
+    $("cfgTicketizer").checked = !!c.ticketizer;
+    $("cfgAutoRun").checked = !!c.auto_run;
   } catch (e) { /* ignore */ }
+}
+function wireFlag(id, key) {
+  $(id).onchange = async () => {
+    try { await api("POST", "/api/config", { [key]: $(id).checked }); toast(`${key} ${$(id).checked ? "on" : "off"}`); }
+    catch (e) { toast(e.message); loadConfig(); }
+  };
+}
+["cfgTesting:testing_mode", "cfgTicketizer:ticketizer", "cfgAutoRun:auto_run"]
+  .forEach((s) => { const [id, key] = s.split(":"); wireFlag(id, key); });
+
+async function runTicket(feedbackId) {
+  const real = $("runReal").checked;
+  if (!confirm(real
+    ? "Start a REAL run on this ticket? It uses your subscription ($) and edits the repo."
+    : "Start a stub run on this ticket? (no API cost; still debits the treasury)")) return;
+  try {
+    const r = await api("POST", "/api/run", { real, confirm: real, feedback_id: feedbackId });
+    toast(`Run queued (${short(r.job_id, 6)}).`); refresh();
+  } catch (e) { toast(e.message); }
 }
 $("repoForm").onsubmit = async (e) => {
   e.preventDefault();

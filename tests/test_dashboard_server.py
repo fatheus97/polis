@@ -170,6 +170,27 @@ class DashboardRunFlowTest(unittest.TestCase):
         detail = self.client.get(f"/api/runs/{runs[0]['run_id']}").json()
         self.assertTrue(detail["timeline"])
 
+    def test_run_targets_specific_feedback_id(self):
+        # The "▶ Run this ticket" button posts a feedback_id; the run must process THAT item.
+        self.client.post("/api/budget", json={"amount": 1000})
+        self.client.post("/api/feedback", json={"text": "alpha task", "directives": {"module": "alphamod"}})
+        self.client.post("/api/feedback", json={"text": "beta task", "directives": {"module": "betamod"}})
+        pend = self.client.get("/api/feedback").json()["pending"]
+        beta = next(p for p in pend if "beta" in p["text"])
+        job_id = self.client.post("/api/run",
+                                  json={"real": False, "feedback_id": beta["id"]}).json()["job_id"]
+        j = {}
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            j = self.client.get(f"/api/jobs/{job_id}").json()
+            if j["status"] in ("done", "error"):
+                break
+            time.sleep(0.3)
+        self.assertEqual(j["status"], "done", j)
+        runs = self.client.get("/api/runs").json()["runs"]
+        self.assertEqual(len(runs), 1, runs)  # ONLY the targeted item ran (alpha untouched)
+        self.assertIn("beta task", runs[0].get("feedback_text") or "")
+
 
 if __name__ == "__main__":
     unittest.main()

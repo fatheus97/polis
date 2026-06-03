@@ -119,7 +119,10 @@ class RunManager:
                             "state_summary": _summarize_state(report.get("state") or {})})
             store.set_feedback_id(report_id, fb["id"])
             if resolve_auto_run(self.base):
-                self.trigger_run(real=False, feedback_id=fb["id"], opts={})
+                # auto_run is the "fully autonomous" path: a distilled ticket kicks off a
+                # REAL run that actually implements the fix (a stub run would be pointless).
+                # It's opt-in (default off) and bounded by the Treasury.
+                self.trigger_run(real=True, feedback_id=fb["id"], opts={})
         except Exception as e:  # the Clerk worker must never die
             # Don't let a Clerk failure (e.g. the claude CLI being unavailable on a fresh
             # install) swallow the report: mark the ticket errored, then STILL file a bare
