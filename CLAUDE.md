@@ -33,6 +33,10 @@ A deterministic Python orchestrator is the **rule of law**; the brakes are the *
 - **Persistence:** SQLite (treasury, run-store, inbox) + append-only JSONL (the Record).
   **git** for workspaces (per-attempt branches; per-run worktrees when `--parallel`).
 - **Sandbox:** `LocalSandbox` (default) or `DockerSandbox` (no-network container).
+- **Dashboard (optional extra):** `polis/dashboard/` is the ONLY part that may use a
+  third-party web framework (FastAPI/uvicorn), installed via `pip install -e '.[dashboard]'`.
+  The core never imports it; `data.py`/`reader.py`/`runner.py` stay stdlib so their tests run in
+  core CI, and the FastAPI server tests self-skip when the extra isn't installed.
 
 ## Environment
 - Windows 11 host. Use the **`py`** launcher locally, **not** `python` (`python` is the Store
@@ -50,6 +54,7 @@ py -m polis budget --appropriate 20              # fund the treasury
 py -m polis submit "..."                         # add feedback
 py -m polis run [--real] [--parallel N] [--architects N] [--constitution-court] [--sandbox docker] [--decorrelate] [--deploy "<cmd>"]
 py -m polis record --tail 30 | runs | status     # read the audit log / runs / summary
+py -m polis dashboard --no-browser               # web control panel (needs the dashboard extra)
 ```
 
 ## Code standards
