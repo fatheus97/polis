@@ -14,6 +14,7 @@ HAVE_GIT = shutil.which("git") is not None
 class ProjectCfgTest(unittest.TestCase):
     def setUp(self):
         self.base = Path(tempfile.mkdtemp(prefix="polis-cfg-"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
 
     def test_default_is_managed_workspace(self):
         self.assertEqual(projectcfg.resolve_workspace(self.base),
@@ -40,10 +41,20 @@ class ProjectCfgTest(unittest.TestCase):
         self.assertTrue(projectcfg.is_managed_default(self.base))
         self.assertEqual(projectcfg.resolve_workspace(self.base),
                          (self.base / "workspace").resolve())
+        self.assertNotIn("workspace", projectcfg.read_config(self.base))  # key cleared
 
     def test_corrupt_config_ignored(self):
         (self.base / "config.json").write_text("{not json", encoding="utf-8")
         self.assertEqual(projectcfg.read_config(self.base), {})
+
+    def test_configured_non_git_dir_is_refused(self):
+        from polis.app import build_government
+        target = Path(tempfile.mkdtemp(prefix="polis-nongit-"))
+        self.addCleanup(shutil.rmtree, target, ignore_errors=True)
+        (target / "somefile.txt").write_text("x", encoding="utf-8")  # non-empty, not a repo
+        projectcfg.write_config(self.base, {"workspace": str(target)})
+        with self.assertRaises(ValueError):
+            build_government(self.base)  # refuses to git-init an existing non-git dir
 
 
 @unittest.skipUnless(HAVE_GIT, "git required")

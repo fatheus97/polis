@@ -11,7 +11,10 @@ default ``<base>/workspace`` (a fresh repo Polis creates).
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
+
+_write_lock = threading.Lock()  # serialize read-modify-write of config.json
 
 
 def config_path(base) -> Path:
@@ -30,13 +33,21 @@ def read_config(base) -> dict:
 
 
 def write_config(base, updates: dict) -> dict:
-    """Merge non-None updates into config.json and return the new config."""
+    """Merge updates into config.json under a lock. None leaves a key unchanged;
+    "" clears it (back to the default)."""
     base = Path(base)
     base.mkdir(parents=True, exist_ok=True)
-    cfg = read_config(base)
-    cfg.update({k: v for k, v in updates.items() if v is not None})
-    config_path(base).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    return cfg
+    with _write_lock:
+        cfg = read_config(base)
+        for k, v in updates.items():
+            if v is None:
+                continue
+            if v == "":
+                cfg.pop(k, None)
+            else:
+                cfg[k] = v
+        config_path(base).write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        return cfg
 
 
 def resolve_workspace(base, override=None) -> Path:

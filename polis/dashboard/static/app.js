@@ -188,8 +188,8 @@ $("repoForm").onsubmit = async (e) => {
   const ws = $("repoPath").value.trim();
   if (ws && !confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
   try {
-    await api("POST", "/api/config", { workspace: ws });
-    $("repoPath").value = ""; toast("Target repo set."); loadConfig();
+    await api("POST", "/api/config", { workspace: ws, main_branch: $("repoBranch").value.trim() || null });
+    $("repoPath").value = ""; $("repoBranch").value = ""; toast("Target repo set."); loadConfig();
   } catch (err) { toast(err.message); }
 };
 

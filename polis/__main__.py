@@ -117,7 +117,8 @@ def main(argv=None) -> int:
                                  resolve_workspace, write_config)
         updates = {}
         if args.repo is not None:
-            updates["workspace"] = str(Path(args.repo).resolve())
+            # "" clears it (reset to managed default); avoid Path("").resolve() == CWD.
+            updates["workspace"] = str(Path(args.repo).resolve()) if args.repo.strip() else ""
         if args.main_branch is not None:
             updates["main_branch"] = args.main_branch
         if updates:

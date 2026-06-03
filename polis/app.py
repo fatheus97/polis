@@ -117,6 +117,12 @@ def build_government(
     inbox = FeedbackInbox(base / "feedback.sqlite")
     if workspace is None:
         ws_path = resolve_workspace(base, workspace_dir)   # override > config > default
+        # Don't silently git-init a user's existing non-git directory (footgun).
+        is_default = ws_path == (base / "workspace").resolve()
+        if (not is_default and ws_path.exists() and any(ws_path.iterdir())
+                and not (ws_path / ".git").exists()):
+            raise ValueError(f"target repo exists but is not a git repository "
+                             f"(refusing to git-init it): {ws_path}")
         workspace = GitWorkspace(ws_path, main_branch=resolve_main_branch(base))
     sandbox = sandbox or LocalSandbox()
     orchestrator = Orchestrator(
