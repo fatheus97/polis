@@ -55,7 +55,6 @@
           </div>
         </form>
         <form id="runForm" class="run-row">
-          <label class="chk"><input type="checkbox" id="runReal" /> real <span class="muted">($)</span></label>
           <label class="chk" title="architects (panel size)">arch
             <input type="number" id="runArchitects" value="1" min="1" /></label>
           <label class="chk"><input type="checkbox" id="runCourt" /> court</label>
@@ -64,11 +63,11 @@
         <div class="flags row" id="cfgFlags">
           <label class="chk" title="show the feedback widget in this app"><input type="checkbox" id="cfgTesting" /> testing</label>
           <label class="chk" title="distill reports into tickets (the Clerk)"><input type="checkbox" id="cfgTicketizer" /> clerk</label>
-          <label class="chk" title="auto-start a REAL run for each distilled ticket"><input type="checkbox" id="cfgAutoRun" /> auto-run <span class="muted">($)</span></label>
+          <label class="chk" title="auto-start a run for each distilled ticket"><input type="checkbox" id="cfgAutoRun" /> auto-run</label>
         </div>
         <p class="muted" style="font-size:.72rem;margin:.1rem 0 .4rem">
-          Toggle <b>real</b> then “Run next”, or open a report below and click <b>▶ Run this ticket</b>.
-          Stub runs cost no API money but still debit the treasury.</p>
+          “Run next”, or open a report and click <b>▶ Run this ticket</b>. Runs use real agents by
+          default; switch to free stubs with <code>config --real-runs off</code>.</p>
         <div id="jobs" class="jobs"></div>
       </article>
     </section>

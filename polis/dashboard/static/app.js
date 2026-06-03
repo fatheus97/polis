@@ -220,11 +220,9 @@ $("feedbackForm").onsubmit = async (e) => {
 };
 $("runForm").onsubmit = async (e) => {
   e.preventDefault();
-  const real = $("runReal").checked;
-  if (real && !confirm("This starts a REAL LLM run that costs money on your subscription. Continue?")) return;
+  // Real-vs-stub is decided by config (real_runs), not here.
   try {
     const r = await api("POST", "/api/run", {
-      real, confirm: real,
       architects: Number($("runArchitects").value) || 1,
       constitution_court: $("runCourt").checked,
     });
@@ -252,12 +250,9 @@ function wireFlag(id, key) {
   .forEach((s) => { const [id, key] = s.split(":"); wireFlag(id, key); });
 
 async function runTicket(feedbackId) {
-  const real = $("runReal").checked;
-  if (!confirm(real
-    ? "Start a REAL run on this ticket? It uses your subscription ($) and edits the repo."
-    : "Start a stub run on this ticket? (no API cost; still debits the treasury)")) return;
+  // Real-vs-stub is decided by config (real_runs), not here.
   try {
-    const r = await api("POST", "/api/run", { real, confirm: real, feedback_id: feedbackId });
+    const r = await api("POST", "/api/run", { feedback_id: feedbackId });
     toast(`Run queued (${short(r.job_id, 6)}).`); refresh();
   } catch (e) { toast(e.message); }
 }

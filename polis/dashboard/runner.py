@@ -100,7 +100,7 @@ class RunManager:
 
     def _clerk_job(self, report_id, submitted_by):
         from ..reports import ReportStore
-        from ..projectcfg import resolve_auto_run
+        from ..projectcfg import resolve_auto_run, resolve_real_runs
         store = ReportStore(self.base)
         try:
             from ..clerk import distill_report, ticket_to_text
@@ -120,9 +120,9 @@ class RunManager:
             store.set_feedback_id(report_id, fb["id"])
             if resolve_auto_run(self.base):
                 # auto_run is the "fully autonomous" path: a distilled ticket kicks off a
-                # REAL run that actually implements the fix (a stub run would be pointless).
-                # It's opt-in (default off) and bounded by the Treasury.
-                self.trigger_run(real=True, feedback_id=fb["id"], opts={})
+                # run that implements the fix. Real-vs-stub follows the real_runs config
+                # (default real). Opt-in (default off) and bounded by the Treasury.
+                self.trigger_run(real=resolve_real_runs(self.base), feedback_id=fb["id"], opts={})
         except Exception as e:  # the Clerk worker must never die
             # Don't let a Clerk failure (e.g. the claude CLI being unavailable on a fresh
             # install) swallow the report: mark the ticket errored, then STILL file a bare
