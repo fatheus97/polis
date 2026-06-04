@@ -58,7 +58,7 @@ dashboard you use *is* the repo Polis edits:
 # one-time
 git clone <your-polis-repo-url> ../polis-dev      # a repo you can push to (your fork)
 cd ../polis-dev                                    # run everything from the clone
-py -m polis --base .polis-selfdev config --repo . --testing-mode on --merge-via-pr on --restart-on-merge on
+py -m polis --base .polis-selfdev config --repo . --testing-mode on --merge-via-pr on --restart-on-merge on --grounded-agents on
 py -m polis --base .polis-selfdev budget --appropriate 20
 
 # every session (from ../polis-dev):
@@ -87,6 +87,7 @@ dashboard the moment a self-dev change merges, so the new code *and* UI just app
 | `config --testing-mode on` | injects the 🐞 feedback widget (off → no widget) |
 | `config --merge-via-pr on` | lands changes via a CI-gated GitHub PR, never local `main` |
 | `config --restart-on-merge on` | auto-restarts the dashboard after a self-dev merge so changes show |
+| `config --grounded-agents on` | agents read the real repo (+ screenshot) instead of working blind — costs more, but verifies against reality |
 | `budget --appropriate 20` | funds the treasury; real runs draw from it (leave `auto_run` off) |
 
 Everything below is **background** — how it works, the build phases, the full CLI. For day-to-day use,

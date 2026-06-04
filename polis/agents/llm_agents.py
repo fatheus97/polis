@@ -12,6 +12,8 @@ Each call records its actual USD cost in ``self.last_cost`` for the Treasury.
 
 from __future__ import annotations
 
+import warnings
+
 from ..llm import LLMBackend, LLMError, extract_json
 from ..models import Branch, Diff, PRD, Verdict
 from .base import Architect, ConstitutionalJudge, Dev, Reviewer
@@ -201,12 +203,23 @@ class ClaudeCodeDev(Dev):
 
 
 class LLMReviewer(Reviewer):
-    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.40):
+    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float | None = None,
+                 grounded: bool = False, timeout: int = 600):
+        # Grounded review is an AGENTIC call (Read/Grep across the repo): it costs more and can run
+        # long — so it gets a higher cost estimate and a longer timeout than a blind one-shot text
+        # review (same reasoning that lifted the dev's window to 900s). The estimate only sizes the
+        # affordability gate; the actual spend is what gets debited.
+        if cost_estimate is None:
+            cost_estimate = 1.00 if grounded else 0.40
         super().__init__("reviewer", Branch.JUDICIAL, cost_estimate)
         self.backend = backend
         self.model = model
+        # When grounded, the reviewer is pointed at the post-change repo (cwd) so it can Read/Grep
+        # the ACTUAL files — verifying "absent/removed" criteria a diff of other files can't show.
+        self.grounded = grounded
+        self.timeout = timeout
 
-    def review(self, prd, diff, test_result, constitution):
+    def review(self, prd, diff, test_result, constitution, cwd=None):
         violations = constitution.check_diff(diff)
         blocking = [v for v in violations if v.severity == "block"]
 
@@ -220,10 +233,21 @@ class LLMReviewer(Reviewer):
         if violations:
             scan = ", ".join(f"{v.rule_id}({v.severity}) in {v.path}" for v in violations)
             parts.append(f"\nMechanical constitution scan flagged: {scan}")
+        if self.grounded and not cwd:
+            warnings.warn("grounded reviewer called without cwd — falling back to a blind review",
+                          stacklevel=2)
+        review_cwd = cwd if (self.grounded and cwd) else None
+        if review_cwd:
+            parts.append(
+                "\nThe current working directory IS the post-change repository (the feature branch "
+                "with this diff applied). Use Read/Grep/Glob to VERIFY each acceptance criterion "
+                "against the actual files — especially criteria about something being removed or "
+                "absent, which a diff of other files cannot show. Do not edit anything.")
         parts.append("\nReturn your verdict as JSON now.")
 
         resp = self.backend.complete("\n".join(parts), system=REVIEWER_SYSTEM,
-                                     model=self.model, extra_args=READONLY_ARGS)
+                                     model=self.model, cwd=review_cwd, extra_args=READONLY_ARGS,
+                                     timeout=self.timeout)
         self.last_cost = resp.cost_usd
 
         try:

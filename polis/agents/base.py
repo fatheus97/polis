@@ -75,7 +75,10 @@ class Reviewer(Agent):
         diff: Diff,
         test_result: TestResult,
         constitution,
+        cwd: str | None = None,
     ) -> Verdict:  # pragma: no cover - interface
+        # `cwd` (when set) is the post-change repository; a grounded reviewer may Read/Grep it
+        # to verify criteria a diff cannot show. Plain reviewers ignore it.
         raise NotImplementedError
 
 

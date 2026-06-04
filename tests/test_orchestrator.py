@@ -134,10 +134,12 @@ class ReviewIndependenceTest(unittest.TestCase):
         self.assertFalse(hasattr(arch, "reviewer"))
 
     def test_reviewer_signature_takes_only_artifacts(self):
-        # The reviewer is handed artifacts (prd, diff, test_result, constitution) —
-        # never the agents that produced them.
+        # The reviewer is handed artifacts (prd, diff, test_result, constitution, and the
+        # post-change repo PATH) — never the agents that produced them. `cwd` is a path
+        # string (an artifact a grounded reviewer reads), not a reference to another branch.
         params = list(inspect.signature(Reviewer.review).parameters)
-        self.assertEqual(params, ["self", "prd", "diff", "test_result", "constitution"])
+        self.assertEqual(params, ["self", "prd", "diff", "test_result", "constitution", "cwd"])
+        self.assertFalse({"architect", "dev", "reviewer"} & set(params))  # no agent references
 
 
 class RecordDetailsTest(unittest.TestCase):

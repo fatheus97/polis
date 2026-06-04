@@ -156,7 +156,8 @@ class FakeLLM(LLMBackend):
     def complete(self, prompt, *, system=None, model=None, cwd=None,
                  permission_mode="default", extra_args=None, timeout=None) -> LLMResponse:
         self.calls.append({"prompt": prompt, "system": system, "model": model,
-                           "cwd": cwd, "permission_mode": permission_mode, "timeout": timeout})
+                           "cwd": cwd, "permission_mode": permission_mode, "timeout": timeout,
+                           "extra_args": extra_args})
         r = self._responses[min(self._i, len(self._responses) - 1)]
         self._i += 1
         if isinstance(r, Exception):

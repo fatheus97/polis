@@ -98,7 +98,7 @@ class StubReviewer(Reviewer):
     def __init__(self, cost: float = 20.0):
         super().__init__("reviewer", Branch.JUDICIAL, cost)
 
-    def review(self, prd, diff, test_result, constitution):
+    def review(self, prd, diff, test_result, constitution, cwd=None):
         violations = constitution.check_diff(diff)
         blocking = [v for v in violations if v.severity == "block"]
         reasons: list[str] = []
