@@ -44,8 +44,8 @@ py -m polis --base .myapp budget --appropriate 20            # fund it (real run
 py -m polis --base .myapp dashboard                          # opens http://127.0.0.1:8765
 ```
 
-In the browser: type what you want built or fixed in the **Submit feedback** box → **Run next** →
-watch it move through the stage timeline. That's the whole loop.
+In the browser: type what you want built or fixed in the **feedback box** (under *Control panel*),
+click **Submit**, then **Run next** — and watch it move through the stage timeline. That's the whole loop.
 
 ### B) Polis on its own dashboard (self-development)
 
@@ -61,6 +61,9 @@ py -m polis --base .dog budget --appropriate 20
 # every session — just this:
 py -m polis --base .dog dashboard
 ```
+
+> **Requires** `gh auth login` + a repo with CI (a fork of this repo has both) — `--merge-via-pr on`
+> opens a real PR and waits for the checks.
 
 In the browser: click the **🐞** button (bottom-right) → describe the issue, optionally paste a
 screenshot → **Submit**. It becomes a ticket in the **Tester reports** panel; open it and click
