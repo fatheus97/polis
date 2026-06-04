@@ -81,6 +81,10 @@ class PullRequestMergerTest(unittest.TestCase):
         self.assertIn("--squash", merge)
         self.assertIn("--subject", merge)
         self.assertEqual(merge[merge.index("--subject") + 1], "Easier repo selection")
+        # the commit body must NOT repeat the subject line (--subject already carries it)
+        commit_body = merge[merge.index("--body") + 1]
+        self.assertNotIn("Easier repo selection", commit_body)
+        self.assertIn("body text here", commit_body)
         self.assertNotIn(("git", "push", "origin", "main"), verbs)
 
     def test_ci_failure_escalates(self):

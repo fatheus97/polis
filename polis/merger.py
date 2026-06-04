@@ -70,9 +70,10 @@ class PullRequestMerger(Merger):
                 raise MergeConflict(f"push failed: {(r.stderr or r.stdout or '')[:200]}")
 
             title = (message.splitlines()[0][:200] if message else branch)
-            body = f"{message}\n\nOpened by Polis (automated)."
+            footer = "Opened by Polis (automated)."
+            # PR description keeps the full message (title line included).
             r = self._run(cwd, self.gh, "pr", "create", "--base", main, "--head", branch,
-                          "--title", title, "--body", body,
+                          "--title", title, "--body", f"{message}\n\n{footer}",
                           timeout=120)
             if r.returncode != 0:
                 raise MergeConflict(f"gh pr create failed: {(r.stderr or r.stdout or '')[:200]}")
@@ -83,8 +84,12 @@ class PullRequestMerger(Merger):
             # Pin the squash commit subject to the PRD-derived PR title. Without --subject,
             # gh defaults to the head branch's commit message — which for Polis is the dev's
             # WIP summary (e.g. "All the pieces are in place. Here's a summary of...").
+            # The commit body drops the title line (--subject already carries it) so it isn't
+            # duplicated in the squashed commit message.
+            rest = "\n".join(message.splitlines()[1:]).lstrip() if message else ""
+            commit_body = f"{rest}\n\n{footer}" if rest else footer
             r = self._run(cwd, self.gh, "pr", "merge", pr, "--squash", "--delete-branch",
-                          "--subject", title, "--body", body,
+                          "--subject", title, "--body", commit_body,
                           timeout=180)
             if r.returncode != 0:
                 raise MergeConflict(f"gh pr merge failed: {(r.stderr or r.stdout or '')[:200]}")
