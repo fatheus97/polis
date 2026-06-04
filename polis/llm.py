@@ -84,7 +84,8 @@ class ClaudeCliBackend(LLMBackend):
         return any(token in text for token in cls._TRANSIENT_TEXT)
 
     def complete(self, prompt, *, system=None, model=None, cwd=None,
-                 permission_mode="default", extra_args=None) -> LLMResponse:
+                 permission_mode="default", extra_args=None, timeout=None) -> LLMResponse:
+        to = timeout or self.timeout   # per-call override (the agentic dev needs longer)
         cmd = [
             self.binary, "-p",
             "--output-format", "json",
@@ -101,12 +102,13 @@ class ClaudeCliBackend(LLMBackend):
             try:
                 proc = subprocess.run(
                     cmd, input=prompt, cwd=cwd or self.default_cwd,
-                    capture_output=True, text=True, encoding="utf-8", timeout=self.timeout,
+                    capture_output=True, text=True, encoding="utf-8", timeout=to,
                     env=self._child_env(),
                 )
             except subprocess.TimeoutExpired:
-                last_err = f"claude CLI timed out after {self.timeout}s"
-                proc = None
+                # A timeout is not a transient API blip; retrying the same long call just wastes
+                # minutes. Fail fast so the run escalates after one window, not 4 attempts.
+                raise LLMError(f"claude CLI timed out after {to}s")
 
             data = None
             if proc is not None and proc.stdout.strip():
@@ -152,9 +154,9 @@ class FakeLLM(LLMBackend):
         self._i = 0
 
     def complete(self, prompt, *, system=None, model=None, cwd=None,
-                 permission_mode="default", extra_args=None) -> LLMResponse:
+                 permission_mode="default", extra_args=None, timeout=None) -> LLMResponse:
         self.calls.append({"prompt": prompt, "system": system, "model": model,
-                           "cwd": cwd, "permission_mode": permission_mode})
+                           "cwd": cwd, "permission_mode": permission_mode, "timeout": timeout})
         r = self._responses[min(self._i, len(self._responses) - 1)]
         self._i += 1
         if isinstance(r, Exception):

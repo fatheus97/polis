@@ -89,6 +89,16 @@ def resolve_merge_via_pr(base) -> bool:
     return bool(read_config(base).get("merge_via_pr", False))
 
 
+def resolve_dev_timeout(base) -> int:
+    """Seconds the agentic dev (Claude Code) may run per attempt before timing out (default 900).
+    The architect/reviewer keep the backend's shorter default."""
+    try:
+        v = int(read_config(base).get("dev_timeout", 900))
+    except (TypeError, ValueError):
+        v = 900
+    return v if v > 0 else 900
+
+
 def resolve_model_tier_overrides(base) -> dict:
     """Per-role model overrides from config (architect_model/dev_model/review_model), as a dict
     for `ModelTier(**overrides)`. Unset roles fall back to ModelTier's defaults."""
