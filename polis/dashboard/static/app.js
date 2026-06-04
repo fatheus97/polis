@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { selected: null, lastFeedTs: 0, openReport: null, reportsCache: [], pendingIds: new Set() };
+const state = { selected: null, detailRunId: null, lastFeedTs: 0, openReport: null, reportsCache: [], pendingIds: new Set() };
 
 async function api(method, path, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
@@ -98,13 +98,27 @@ function renderDetail(d) {
         <span class="who muted">${esc(e.actor)}</span></span>
       <span class="cost">${e.cost ? money(e.cost) : ""}</span>
     </div>`).join("");
+  // Preserve the timeline's scroll across the 2.5s in-flight re-render (only for the SAME
+  // run; a fresh selection starts at the top). Stick to the bottom if you were already there.
+  const same = d.run_id === state.detailRunId;
+  state.detailRunId = d.run_id;
+  const oldTl = same ? $("detail").querySelector(".timeline") : null;
+  const prevTop = oldTl ? oldTl.scrollTop : 0;
+  const wasBottom = oldTl && (oldTl.scrollTop + oldTl.clientHeight >= oldTl.scrollHeight - 30);
   $("detail").innerHTML = strip + facts + `<div class="timeline">${rows}</div>`;
+  const newTl = $("detail").querySelector(".timeline");
+  if (newTl && same) newTl.scrollTop = wasBottom ? newTl.scrollHeight : prevTop;
 }
 
 async function selectRun(id) {
   state.selected = id;
+  try { localStorage.setItem("polis.selected", id); } catch (e) { /* private mode */ }
   try { renderDetail(await api("GET", `/api/runs/${id}`)); }
-  catch (e) { $("detail").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+  catch (e) {
+    // Drop a stale stored id (e.g. a cleared DB / new instance) so it doesn't error every reload.
+    try { localStorage.removeItem("polis.selected"); } catch (_) { /* private mode */ }
+    $("detail").innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+  }
 }
 
 function renderFeed(events) {
@@ -188,10 +202,12 @@ function renderReports(list) {
 async function refresh() {
   if (!$("live").checked) return;
   try {
+    // First load (incl. after a hard refresh) fills the feed to its cap; then poll incrementally.
+    const evUrl = state.lastFeedTs ? `/api/events?since_ts=${state.lastFeedTs}` : `/api/events?tail=200`;
     const [ov, runs, feed, jobs, reports, feedback] = await Promise.all([
       api("GET", "/api/overview"),
       api("GET", "/api/runs"),
-      api("GET", `/api/events?since_ts=${state.lastFeedTs}`),
+      api("GET", evUrl),
       api("GET", "/api/jobs"),
       api("GET", "/api/reports"),
       api("GET", "/api/feedback"),
@@ -266,6 +282,17 @@ $("repoForm").onsubmit = async (e) => {
   } catch (err) { toast(err.message); }
 };
 
+// Restore UI state across reloads (incl. Ctrl-Shift-R): the selected run + run-row options.
+try {
+  const a = localStorage.getItem("polis.arch"); if (a) $("runArchitects").value = a;
+  $("runCourt").checked = localStorage.getItem("polis.court") === "1";
+  state.selected = localStorage.getItem("polis.selected") || null;
+} catch (e) { /* private mode */ }
+const persist = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
+$("runArchitects").onchange = () => persist("polis.arch", $("runArchitects").value);
+$("runCourt").onchange = () => persist("polis.court", $("runCourt").checked ? "1" : "");
+
 loadConfig();
+if (state.selected) selectRun(state.selected);  // re-open the previously selected run's timeline
 refresh();
 setInterval(refresh, 2500);

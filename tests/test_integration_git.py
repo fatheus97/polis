@@ -48,9 +48,11 @@ class GitIntegrationTest(unittest.TestCase):
         self.assertTrue(res.merged, msg=res.reason)
         self.assertTrue(res.test_result.passed)
         self.assertTrue((ws.path / "feature.py").exists(), "feature landed on main")
-        log = subprocess.run(["git", "log", "--oneline"], cwd=ws.path,
-                             capture_output=True, text=True).stdout.lower()
-        self.assertIn("merge", log)
+        # A real --no-ff merge commit exists, now titled by the PRD (not "Polis: merge …").
+        merges = subprocess.run(["git", "log", "--merges", "--oneline"], cwd=ws.path,
+                                capture_output=True, text=True).stdout
+        self.assertTrue(merges.strip(), "expected a merge commit on main")
+        self.assertIn("add a feature that returns ok", merges)  # PRD title is the merge subject
 
     def test_real_failing_then_passing_revises_and_merges(self):
         tmp = Path(tempfile.mkdtemp(prefix="polis-int-"))

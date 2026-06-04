@@ -50,17 +50,19 @@ click **Submit**, then **Run next** — and watch it move through the stage time
 
 ### B) Polis on its own dashboard (self-development)
 
-Here you report issues with the floating **🐞 widget** and Polis improves its *own* dashboard. Point it
-at a **dedicated clone** with PR-based merge, so it never touches the checkout you're editing:
+To improve Polis's *own* dashboard with a loop that actually closes (give feedback → **see** the
+fix), **run the dashboard from a dedicated clone and point Polis at that same clone.** Then the
+dashboard you use *is* the repo Polis edits:
 
 ```powershell
 # one-time
-git clone <your-polis-repo-url> ../polis-dev                 # a repo you can push to (your fork)
-py -m polis --base .polis-selfdev config --repo ../polis-dev --testing-mode on --merge-via-pr on
+git clone <your-polis-repo-url> ../polis-dev      # a repo you can push to (your fork)
+cd ../polis-dev                                    # run everything from the clone
+py -m polis --base .polis-selfdev config --repo . --testing-mode on --merge-via-pr on
 py -m polis --base .polis-selfdev budget --appropriate 20
 
-# every session — just this:
-py -m polis --base .polis-selfdev dashboard
+# every session (from ../polis-dev):
+py -m polis --base .polis-selfdev dashboard        # serves THIS clone
 ```
 
 > **Requires** `gh auth login` + a repo with CI (a fork of this repo has both) — `--merge-via-pr on`
@@ -68,7 +70,12 @@ py -m polis --base .polis-selfdev dashboard
 
 In the browser: click the **🐞** button (bottom-right) → describe the issue, optionally paste a
 screenshot → **Submit**. It becomes a ticket in the **Tester reports** panel; open it and click
-**▶ Run this ticket**. Polis opens a PR you review and merge.
+**▶ Run this ticket**. Polis opens a PR — **review and merge it.**
+
+**Why run *from* the clone?** The dashboard always serves files from whichever checkout you run
+`py -m polis` in — **not** from `--repo` (which only sets where Polis *develops*). Running from the
+clone makes them the same, so after you merge Polis's PR (the merger syncs the clone): **CSS/HTML/JS
+fixes appear on a browser refresh; Python (`server.py`) changes need a dashboard restart.**
 
 **What the one-time flags mean** (they persist, so later sessions are just `dashboard`):
 
