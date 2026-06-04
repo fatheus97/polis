@@ -96,6 +96,42 @@ class ReviewerHardGateTest(unittest.TestCase):
         self.assertFalse(v.approved)
 
 
+class ReviewerGroundingTest(unittest.TestCase):
+    """A grounded reviewer is handed the post-change repo (cwd) so it can verify criteria a
+    diff can't show; the default reviewer stays blind (backward-compat); hard gates are intact."""
+
+    def setUp(self):
+        self.c = Constitution.load()
+        self.prd = PRD(title="t", goal="g")
+        self.diff = Diff(changes=[FileChange("a.py", "x = 1\n")])
+
+    def test_grounded_reviewer_reads_the_post_change_repo(self):
+        fake = FakeLLM(['{"approved": true, "reasons": ["ok"]}'])
+        LLMReviewer(fake, grounded=True).review(
+            self.prd, self.diff, TestResult(ran=True, passed=True), self.c, cwd="/feature/branch")
+        call = fake.calls[0]
+        self.assertEqual(call["cwd"], "/feature/branch")        # pointed at the real repo
+        self.assertIn("Read/Grep/Glob", call["prompt"])         # told to verify against files
+        self.assertIn("--disallowedTools", call["extra_args"])  # but still can't Edit/Write
+
+    def test_default_reviewer_is_blind(self):
+        # Backward-compat: without grounding the cwd is ignored — identical to today's behavior.
+        fake = FakeLLM(['{"approved": true, "reasons": ["ok"]}'])
+        LLMReviewer(fake).review(
+            self.prd, self.diff, TestResult(ran=True, passed=True), self.c, cwd="/feature/branch")
+        self.assertIsNone(fake.calls[0]["cwd"])
+        self.assertNotIn("Read/Grep/Glob", fake.calls[0]["prompt"])
+
+    def test_grounded_reviewer_hard_gates_still_apply(self):
+        # A lenient model approves, but tests failed -> the hard gate flips it to reject.
+        fake = FakeLLM(['{"approved": true, "reasons": ["lgtm"]}'])
+        v = LLMReviewer(fake, grounded=True).review(
+            self.prd, self.diff, TestResult(ran=True, passed=False, summary="fail"),
+            self.c, cwd="/feature/branch")
+        self.assertFalse(v.approved)
+        self.assertTrue(any("not green" in r.lower() for r in v.reasons))
+
+
 class RealAgentsCostAccountingTest(unittest.TestCase):
     """End-to-end through the orchestrator with FakeLLM agents: proves ACTUAL per-call
     cost (not the estimate) is debited, and that the real agents satisfy the same

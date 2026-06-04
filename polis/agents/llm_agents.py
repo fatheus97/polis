@@ -201,12 +201,16 @@ class ClaudeCodeDev(Dev):
 
 
 class LLMReviewer(Reviewer):
-    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.40):
+    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.40,
+                 grounded: bool = False):
         super().__init__("reviewer", Branch.JUDICIAL, cost_estimate)
         self.backend = backend
         self.model = model
+        # When grounded, the reviewer is pointed at the post-change repo (cwd) so it can Read/Grep
+        # the ACTUAL files — verifying "absent/removed" criteria a diff of other files can't show.
+        self.grounded = grounded
 
-    def review(self, prd, diff, test_result, constitution):
+    def review(self, prd, diff, test_result, constitution, cwd=None):
         violations = constitution.check_diff(diff)
         blocking = [v for v in violations if v.severity == "block"]
 
@@ -220,10 +224,17 @@ class LLMReviewer(Reviewer):
         if violations:
             scan = ", ".join(f"{v.rule_id}({v.severity}) in {v.path}" for v in violations)
             parts.append(f"\nMechanical constitution scan flagged: {scan}")
+        review_cwd = cwd if (self.grounded and cwd) else None
+        if review_cwd:
+            parts.append(
+                "\nThe current working directory IS the post-change repository (the feature branch "
+                "with this diff applied). Use Read/Grep/Glob to VERIFY each acceptance criterion "
+                "against the actual files — especially criteria about something being removed or "
+                "absent, which a diff of other files cannot show. Do not edit anything.")
         parts.append("\nReturn your verdict as JSON now.")
 
         resp = self.backend.complete("\n".join(parts), system=REVIEWER_SYSTEM,
-                                     model=self.model, extra_args=READONLY_ARGS)
+                                     model=self.model, cwd=review_cwd, extra_args=READONLY_ARGS)
         self.last_cost = resp.cost_usd
 
         try:

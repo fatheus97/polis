@@ -95,6 +95,13 @@ def resolve_restart_on_merge(base) -> bool:
     return bool(read_config(base).get("restart_on_merge", False))
 
 
+def resolve_grounded_agents(base) -> bool:
+    """When on, agents get EYES: the Reviewer reads the post-change repo to verify criteria a diff
+    can't show (and, later, the Architect reads the code + tester screenshot). These are agentic
+    `claude` calls — more tokens/latency than a one-shot completion. Default off."""
+    return bool(read_config(base).get("grounded_agents", False))
+
+
 def resolve_dev_timeout(base) -> int:
     """Seconds the agentic dev (Claude Code) may run per attempt before timing out (default 900).
     The architect/reviewer keep the backend's shorter default."""

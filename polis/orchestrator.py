@@ -283,7 +283,10 @@ class Orchestrator:
                     return result(Stage.ESCALATE, Stage.REVIEW,
                                   "budget_exhausted: cannot fund REVIEW")
                 try:
-                    verdict = reviewer.review(prd, diff, test_result, self.constitution)
+                    # Hand over the post-change working tree (the feature branch with the diff
+                    # applied); a grounded reviewer reads it to verify, a plain one ignores it.
+                    verdict = reviewer.review(prd, diff, test_result, self.constitution,
+                                              cwd=str(ws.path))
                 except LLMError as e:
                     self.workspace.discard()
                     return result(Stage.ESCALATE, Stage.REVIEW, f"llm_error: {e}")

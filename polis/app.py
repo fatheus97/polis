@@ -17,9 +17,9 @@ from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
 from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
-from .projectcfg import (resolve_dev_timeout, resolve_main_branch, resolve_merge_via_pr,
-                         resolve_model_tier_overrides, resolve_testing_mode,
-                         resolve_workspace)
+from .projectcfg import (resolve_dev_timeout, resolve_grounded_agents, resolve_main_branch,
+                         resolve_merge_via_pr, resolve_model_tier_overrides,
+                         resolve_testing_mode, resolve_workspace)
 from .record import Record
 from .registry import ModelTier, Registry
 from .sandbox import LocalSandbox, Sandbox
@@ -124,7 +124,8 @@ def build_government(
         # No explicit tier (e.g. dashboard runs) => take per-role models from config.
         tier = tier or ModelTier(**resolve_model_tier_overrides(base))
         registry = Registry.real(backend, tier, testing_mode=resolve_testing_mode(base),
-                                 dev_timeout=resolve_dev_timeout(base))
+                                 dev_timeout=resolve_dev_timeout(base),
+                                 grounded=resolve_grounded_agents(base))
     else:
         registry = Registry.default()
     run_store = RunStore(base / "runs.sqlite")

@@ -116,6 +116,11 @@ class ProjectCfgTest(unittest.TestCase):
         projectcfg.write_config(self.base, {"restart_on_merge": True})
         self.assertTrue(projectcfg.resolve_restart_on_merge(self.base))
 
+    def test_grounded_agents_default_off_and_config(self):
+        self.assertFalse(projectcfg.resolve_grounded_agents(self.base))    # default off
+        projectcfg.write_config(self.base, {"grounded_agents": True})
+        self.assertTrue(projectcfg.resolve_grounded_agents(self.base))
+
     def test_merge_via_pr_default_off_and_injection(self):
         from polis.app import build_government
         from polis.merger import LocalMerger, PullRequestMerger

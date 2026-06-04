@@ -113,7 +113,8 @@ class Registry:
 
     @classmethod
     def real(cls, backend, tier: "ModelTier | None" = None,
-             testing_mode: bool = False, dev_timeout: int = 900) -> "Registry":
+             testing_mode: bool = False, dev_timeout: int = 900,
+             grounded: bool = False) -> "Registry":
         """The Phase-1 government: real, model-backed officials sharing one backend."""
         from .agents.llm_agents import (ClaudeCodeDev, LLMArchitect,
                                         LLMConstitutionalJudge, LLMReviewer)
@@ -129,7 +130,9 @@ class Registry:
                                                         timeout=dev_timeout),
                                   "Claude Code dev: PRD -> code edits."))
         reg.register(RoleTemplate("reviewer", Branch.JUDICIAL,
-                                  lambda: LLMReviewer(backend, tier.reviewer),
+                                  lambda: LLMReviewer(backend, tier.reviewer,
+                                                      cost_estimate=(1.00 if grounded else 0.40),
+                                                      grounded=grounded),
                                   "LLM reviewer: diff -> verdict (+ hard gates)."))
         reg.register(RoleTemplate("constitutional-judge", Branch.JUDICIAL,
                                   lambda: LLMConstitutionalJudge(backend, tier.reviewer),
