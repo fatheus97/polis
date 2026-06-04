@@ -6,6 +6,7 @@ writes/runs go through a single RunManager (serialized). Binds 127.0.0.1 by defa
 
 from __future__ import annotations
 
+import subprocess
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
@@ -263,6 +264,48 @@ def create_app(base) -> FastAPI:
                 updates[flag] = bool(v)
         write_config(base, updates)
         return _config_view()
+
+    @app.post("/api/browse")
+    def browse():
+        """Open an OS folder picker server-side; return the chosen path or 204 if unavailable."""
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            path = filedialog.askdirectory(parent=root)
+            root.destroy()
+        except Exception:
+            return Response(status_code=204)
+        if not path:
+            return Response(status_code=204)
+        return {"path": str(Path(path).resolve())}
+
+    @app.get("/api/branches")
+    def list_branches(path: str = Query("")):
+        """List local git branches for the given repo path; returns [] on any error."""
+        if not path:
+            return {"branches": []}
+        try:
+            result = subprocess.run(
+                ["git", "branch"],
+                cwd=str(Path(path)),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except Exception:
+            return {"branches": []}
+        if result.returncode != 0:
+            return {"branches": []}
+        branches = []
+        for line in result.stdout.splitlines():
+            name = line.strip()
+            if name.startswith("*"):
+                name = name[1:].strip()
+            if name:
+                branches.append(name)
+        return {"branches": branches}
 
     # Templated widget: prepend the configured intake URL so external apps can embed
     # <script src="http://<host>:8765/static/feedback-widget.js">. Declared BEFORE the
