@@ -34,6 +34,9 @@ class ModelTier:
     architect: str = "sonnet"
     reviewer: str = "sonnet"
     dev: str = "sonnet"
+    # Optional plan-then-execute tiering: when set, the dev does a read-only PLAN pass with this
+    # model (e.g. "opus") then EXECUTEs with `dev`. None (default) = single execute pass.
+    dev_plan_model: str | None = None
 
 
 # Curated specialist expertise. An unknown discipline is still hireable — its
@@ -128,7 +131,8 @@ class Registry:
         reg.register(RoleTemplate("dev", Branch.EXECUTIVE,
                                   lambda: ClaudeCodeDev(backend, tier.dev,
                                                         testing_mode=testing_mode,
-                                                        timeout=dev_timeout),
+                                                        timeout=dev_timeout,
+                                                        plan_model=tier.dev_plan_model),
                                   "Claude Code dev: PRD -> code edits."))
         reg.register(RoleTemplate("reviewer", Branch.JUDICIAL,
                                   lambda: LLMReviewer(backend, tier.reviewer, grounded=grounded),
@@ -141,9 +145,10 @@ class Registry:
             if discipline:
                 expertise = SPECIALISTS.get(discipline, f"{discipline} engineering")
                 return ClaudeCodeDev(backend, tier.dev, specialty=expertise,
-                                     testing_mode=testing_mode, timeout=dev_timeout)
+                                     testing_mode=testing_mode, timeout=dev_timeout,
+                                     plan_model=tier.dev_plan_model)
             return ClaudeCodeDev(backend, tier.dev, testing_mode=testing_mode,
-                                 timeout=dev_timeout)
+                                 timeout=dev_timeout, plan_model=tier.dev_plan_model)
 
         reg._dev_factory = _hire
         return reg

@@ -126,6 +126,8 @@ def main(argv=None) -> int:
                       help="model for the architect that writes the spec (e.g. opus, sonnet, haiku)")
     pcfg.add_argument("--dev-model", default=None,
                       help="model for the dev that writes the code (default sonnet)")
+    pcfg.add_argument("--dev-plan-model", default=None,
+                      help="optional planning model: the dev plans read-only with this (e.g. opus) then executes")
     pcfg.add_argument("--review-model", default=None,
                       help="model for the reviewer")
     pcfg.add_argument("--dev-timeout", type=_positive_seconds, default=None,
@@ -170,7 +172,8 @@ def main(argv=None) -> int:
         if args.intake_origins is not None:
             updates["intake_origins"] = [o.strip() for o in args.intake_origins.split(",") if o.strip()]
         for mkey, mval in (("architect_model", args.architect_model),
-                           ("dev_model", args.dev_model), ("review_model", args.review_model)):
+                           ("dev_model", args.dev_model), ("review_model", args.review_model),
+                           ("dev_plan_model", args.dev_plan_model)):
             if mval is not None:
                 updates[mkey] = mval.strip()
         if args.dev_timeout is not None:
@@ -189,7 +192,7 @@ def main(argv=None) -> int:
               f"grounded_agents : {resolve_grounded_agents(args.base)}")
         t = ModelTier(**resolve_model_tier_overrides(args.base))
         print(f"models       : architect={t.architect}  dev={t.dev}  reviewer={t.reviewer}"
-              f"   dev_timeout={resolve_dev_timeout(args.base)}s")
+              f"  dev_plan={t.dev_plan_model}   dev_timeout={resolve_dev_timeout(args.base)}s")
         return 0
 
     config = None
@@ -203,9 +206,13 @@ def main(argv=None) -> int:
         )
         if args.real:
             from .projectcfg import resolve_model_tier_overrides
-            # precedence: per-role flag > --model > config (architect_model/…) > default
-            tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)
-                    if args.model else ModelTier(**resolve_model_tier_overrides(args.base)))
+            base_overrides = resolve_model_tier_overrides(args.base)
+            # precedence: per-role flag > --model > config (architect_model/…) > default.
+            # A bare --model overrides the three role models but must NOT drop a configured
+            # dev_plan_model (plan-then-execute is orthogonal to which model executes).
+            tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model,
+                              dev_plan_model=base_overrides.get("dev_plan_model"))
+                    if args.model else ModelTier(**base_overrides))
             if args.architect_model:
                 tier.architect = args.architect_model
             if args.dev_model:

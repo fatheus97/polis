@@ -121,6 +121,35 @@ class DevTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ClaudeCodeDev(FakeLLM(["x"])).implement(PRD(title="t", goal="g"))
 
+    def test_single_pass_when_no_plan_model(self):
+        # Default (no plan_model): exactly one model call — unchanged behavior + cost.
+        fake = FakeLLM([LLMResponse(text="done", cost_usd=0.5)])
+        ws = FakeWorkspace(); ws.fake_changes = [FileChange("a.py", "x = 1\n")]
+        ClaudeCodeDev(fake, model="sonnet").implement(PRD(title="t", goal="g"), workspace=ws)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_plan_then_execute(self):
+        fake = FakeLLM([LLMResponse(text="1. edit a.py\n2. add a test", cost_usd=0.3),  # PLAN
+                        LLMResponse(text="implemented", cost_usd=0.5)])                  # EXECUTE
+        ws = FakeWorkspace(); ws.fake_changes = [FileChange("a.py", "x = 1\n")]
+        dev = ClaudeCodeDev(fake, model="sonnet", plan_model="opus")
+        diff = dev.implement(PRD(title="t", goal="g"), workspace=ws)
+        self.assertEqual(len(fake.calls), 2)
+        plan, execute = fake.calls
+        self.assertEqual(plan["model"], "opus")                       # Opus plans
+        self.assertIn("--disallowedTools", plan["extra_args"])        # plan pass is read-only
+        self.assertEqual(plan["permission_mode"], "default")          # not acceptEdits — can't edit
+        self.assertEqual(plan["cwd"], ws.path)                        # reads the repo
+        self.assertEqual(execute["model"], "sonnet")                  # Sonnet executes
+        self.assertEqual(execute["permission_mode"], "acceptEdits")
+        self.assertIn("1. edit a.py", execute["prompt"])              # plan injected into execute
+        self.assertEqual(dev.last_cost, 0.8)                          # one debit = plan + execute
+        self.assertTrue(diff.summary.startswith("Plan:"))
+
+    def test_plan_model_bumps_cost_estimate(self):
+        self.assertEqual(ClaudeCodeDev(FakeLLM(["x"])).cost, 1.50)
+        self.assertEqual(ClaudeCodeDev(FakeLLM(["x"]), plan_model="opus").cost, 3.50)
+
 
 class ReviewerHardGateTest(unittest.TestCase):
     def setUp(self):
@@ -246,6 +275,60 @@ class RealAgentsCostAccountingTest(unittest.TestCase):
         judicial = [e for e in Record(tmp / "record.jsonl").events()
                     if e["actor"].startswith("judicial")]
         self.assertTrue(judicial and all(e["source"] == "procedure" for e in judicial))
+
+    def test_plan_then_execute_debits_both_passes_through_orchestrator(self):
+        # End-to-end: a dev_plan_model tier makes the dev call the model twice; the orchestrator's
+        # single dev debit must capture BOTH passes' actual cost.
+        from polis.registry import ModelTier
+        backend = FakeLLM([
+            LLMResponse(text=PRD_JSON, cost_usd=0.10),                                  # architect
+            LLMResponse(text="1. edit x\n2. test x", cost_usd=0.30),                    # dev PLAN
+            LLMResponse(text="implemented", cost_usd=0.50),                             # dev EXECUTE
+            LLMResponse(text='{"approved": true, "reasons": ["ok"]}', cost_usd=0.20),   # reviewer
+        ])
+        treasury = Treasury(":memory:")
+        treasury.appropriate(100)
+        ws = FakeWorkspace()
+        ws.fake_changes = [FileChange("feature.py", "x = 1\n")]
+        tmp = Path(tempfile.mkdtemp(prefix="polis-plan-"))
+        orch = Orchestrator(
+            registry=Registry.real(backend, ModelTier(dev_plan_model="opus")),
+            treasury=treasury, record=Record(tmp / "record.jsonl"),
+            constitution=Constitution.load(), workspace=ws,
+            sandbox=ScriptedSandbox([passing()]), run_store=RunStore(":memory:"),
+            config=OrchestratorConfig(),
+        )
+        res = orch.process(FeedbackItem(text="add a feature"))
+        self.assertTrue(res.merged)
+        # architect .10 + dev (plan .30 + execute .50) + reviewer .20 = 1.10
+        self.assertAlmostEqual(treasury.spent_on(res.run_id), 1.10, places=9)
+
+    def test_plan_cost_debited_even_when_execute_fails(self):
+        # If the plan pass spends real money and the execute pass then errors, the plan cost must
+        # still be charged (not silently lost) when the run escalates.
+        from polis.registry import ModelTier
+        backend = FakeLLM([
+            LLMResponse(text=PRD_JSON, cost_usd=0.10),       # architect
+            LLMResponse(text="1. edit x", cost_usd=0.30),    # dev PLAN ok (real Opus spend)
+            LLMError("claude API error: Overloaded"),        # dev EXECUTE fails
+        ])
+        treasury = Treasury(":memory:")
+        treasury.appropriate(100)
+        ws = FakeWorkspace()
+        ws.fake_changes = [FileChange("f.py", "x = 1\n")]
+        tmp = Path(tempfile.mkdtemp(prefix="polis-planfail-"))
+        orch = Orchestrator(
+            registry=Registry.real(backend, ModelTier(dev_plan_model="opus")),
+            treasury=treasury, record=Record(tmp / "record.jsonl"),
+            constitution=Constitution.load(), workspace=ws,
+            sandbox=ScriptedSandbox([passing()]), run_store=RunStore(":memory:"),
+            config=OrchestratorConfig(),
+        )
+        res = orch.process(FeedbackItem(text="x"))
+        self.assertEqual(res.outcome, Stage.ESCALATE)
+        self.assertEqual(res.last_stage, Stage.IMPLEMENT)
+        # architect .10 + dev plan .30 (execute failed) = .40 — the plan spend is NOT lost
+        self.assertAlmostEqual(treasury.spent_on(res.run_id), 0.40, places=9)
 
     def test_infra_error_escalates_rather_than_rejecting(self):
         # A transient API failure must ESCALATE (human attention), not be mistaken for
