@@ -150,17 +150,17 @@ its code and the copy you edit could be the same checkout. The safe setup is a *
 plus **PR-based merge**, so Polis never touches your working tree or `main`:
 
 ```powershell
-git clone https://github.com/fatheus97/polis ../polis-dev
+git clone <your-polis-repo-url> ../polis-dev    # a repo you can push to (your fork)
 py -m polis --base .dog config --repo ../polis-dev --testing-mode on --merge-via-pr on
 py -m polis --base .dog dashboard
 ```
 
 What each line does:
 
-1. **`git clone … ../polis-dev`** — a throwaway, *dedicated* checkout of the repo Polis will edit,
-   separate from the copy you work in. All of Polis's branch/checkout churn happens here, never in
-   your tree. Its `origin` points at GitHub, so the PRs it opens land on the real repo — after CI
-   and your review.
+1. **`git clone <your-polis-repo-url> ../polis-dev`** — a throwaway, *dedicated* checkout of the
+   repo Polis will edit, separate from the copy you work in. All of Polis's branch/checkout churn
+   happens here, never in your tree. Use a repo you have push access to (your own fork), so its
+   `origin` is a GitHub repo where the PRs it opens can run CI and be merged after your review.
 2. **`config --repo ../polis-dev --testing-mode on --merge-via-pr on`** — for this `.dog` instance:
    point the workspace at the clone (`--repo`), inject the feedback widget (`--testing-mode on`), and
    turn on **PR-based merge** (`--merge-via-pr on`) so Polis lands changes by pushing a branch and
@@ -171,8 +171,8 @@ What each line does:
    workflow skips them — the orchestrator's own Reviewer already vetted the diff and required CI
    still gates the merge.)
 
-First fund the treasury (`budget --appropriate 20`) and leave `auto_run` off so you stay in the
-loop. Needs `gh` authenticated + CI on the repo — a clone of this repo has both.
+First fund the treasury (`py -m polis --base .dog budget --appropriate 20`) and leave `auto_run`
+off so you stay in the loop. Needs `gh` authenticated + CI on the repo — a clone of this repo has both.
 
 ## Roadmap
 
