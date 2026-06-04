@@ -57,6 +57,15 @@ class Government:
         The inbox is touched only from this (main) thread, so it needs no locking."""
         if not items:
             return []
+        # PR-based merge can't run across worktrees (git won't check out main in two places,
+        # so the merger's sync step would fail and every run would escalate). Fall back to a
+        # local merge for the parallel batch instead of failing silently.
+        from .merger import LocalMerger, PullRequestMerger
+        if isinstance(self.orchestrator.merger, PullRequestMerger):
+            import sys
+            print("[polis] merge_via_pr is not supported with --parallel; using a local merge "
+                  "for this batch.", file=sys.stderr)
+            self.orchestrator.merger = LocalMerger()
         # Honor the configured target repo (not the hardcoded default) so parallel
         # runs develop the same repo as sequential ones.
         manager = WorktreeManager(self.workspace.path,
