@@ -131,6 +131,26 @@ class ReviewerGroundingTest(unittest.TestCase):
         self.assertFalse(v.approved)
         self.assertTrue(any("not green" in r.lower() for r in v.reasons))
 
+    def test_grounded_reviewer_uses_a_longer_timeout(self):
+        # An agentic Read/Grep over the repo can exceed the 300s one-shot default (the same reason
+        # the dev's window was raised) — so a timeout is passed explicitly.
+        fake = FakeLLM(['{"approved": true, "reasons": ["ok"]}'])
+        LLMReviewer(fake, grounded=True).review(
+            self.prd, self.diff, TestResult(ran=True, passed=True), self.c, cwd="/x")
+        self.assertEqual(fake.calls[0]["timeout"], 600)
+
+    def test_reviewer_cost_estimate_is_self_contained(self):
+        # The grounded↔cost coupling lives in the constructor, not in the caller.
+        self.assertEqual(LLMReviewer(FakeLLM(["x"])).cost, 0.40)
+        self.assertEqual(LLMReviewer(FakeLLM(["x"]), grounded=True).cost, 1.00)
+
+    def test_grounded_reviewer_without_cwd_warns_and_falls_back(self):
+        fake = FakeLLM(['{"approved": true, "reasons": ["ok"]}'])
+        with self.assertWarns(UserWarning):
+            LLMReviewer(fake, grounded=True).review(
+                self.prd, self.diff, TestResult(ran=True, passed=True), self.c)  # no cwd
+        self.assertIsNone(fake.calls[0]["cwd"])  # silently-blind path is now surfaced
+
 
 class RealAgentsCostAccountingTest(unittest.TestCase):
     """End-to-end through the orchestrator with FakeLLM agents: proves ACTUAL per-call
