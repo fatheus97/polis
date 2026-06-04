@@ -83,6 +83,12 @@ def resolve_real_runs(base) -> bool:
     return bool(read_config(base).get("real_runs", True))
 
 
+def resolve_merge_via_pr(base) -> bool:
+    """When on, Polis lands changes via a GitHub PR (push -> wait CI -> squash-merge) instead
+    of a local merge into main. Needs an 'origin' remote + gh + CI. Default off."""
+    return bool(read_config(base).get("merge_via_pr", False))
+
+
 def resolve_intake_url(base) -> str:
     """Absolute intake URL baked into the served widget for cross-origin apps
     (empty => the widget posts same-origin to /api/report-intake)."""

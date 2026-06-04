@@ -17,7 +17,8 @@ from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
 from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
-from .projectcfg import resolve_main_branch, resolve_testing_mode, resolve_workspace
+from .projectcfg import (resolve_main_branch, resolve_merge_via_pr, resolve_testing_mode,
+                         resolve_workspace)
 from .record import Record
 from .registry import ModelTier, Registry
 from .sandbox import LocalSandbox, Sandbox
@@ -131,10 +132,16 @@ def build_government(
     if Path(getattr(workspace, "path", "") or ".").resolve() != polis_root:
         constitution.rules = [r for r in constitution.rules if r.id != "protect-core"]
     sandbox = sandbox or LocalSandbox()
+    config = config or OrchestratorConfig()
+    # PR-based merge (opt-in): land changes via a CI-gated GitHub PR instead of a local merge
+    # into main. Default stays LocalMerger, so existing runs are unchanged.
+    if config.merger is None and resolve_merge_via_pr(base):
+        from .merger import PullRequestMerger
+        config.merger = PullRequestMerger(main_branch=resolve_main_branch(base))
     orchestrator = Orchestrator(
         registry=registry, treasury=treasury, record=record, constitution=constitution,
         workspace=workspace, sandbox=sandbox, run_store=run_store,
-        config=config or OrchestratorConfig(),
+        config=config,
     )
     return Government(
         base=base, treasury=treasury, record=record, constitution=constitution,

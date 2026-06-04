@@ -55,6 +55,19 @@ class FakeWorkspace:
         self.current = None
 
 
+class FakeMerger:
+    """Records merge() calls and returns a deterministic sha. No git/gh — for exercising
+    the orchestrator's merger seam hermetically."""
+
+    def __init__(self):
+        self.calls: list = []  # (branch, message)
+
+    def merge(self, workspace, branch, message):
+        sha = f"{len(self.calls):04d}deadbeefcafef00d"
+        self.calls.append((branch, message))
+        return sha
+
+
 class ScriptedSandbox(Sandbox):
     """Returns the given TestResults in order; the last one repeats."""
 
@@ -79,7 +92,8 @@ def failing():
 class Harness:
     def __init__(self, *, budget=1000.0, sandbox=None, workspace=None,
                  max_revisions=2, per_task_cap=None, spawn_cost=0.0,
-                 constitutional_review=False, max_prd_revisions=1, num_architects=1):
+                 constitutional_review=False, max_prd_revisions=1, num_architects=1,
+                 merger=None):
         self.tmp = Path(tempfile.mkdtemp(prefix="polis-test-"))
         self.treasury = Treasury(":memory:")
         if budget:
@@ -98,7 +112,7 @@ class Harness:
                                       per_task_cap=per_task_cap, spawn_cost=spawn_cost,
                                       constitutional_review=constitutional_review,
                                       max_prd_revisions=max_prd_revisions,
-                                      num_architects=num_architects),
+                                      num_architects=num_architects, merger=merger),
         )
 
     def events(self):

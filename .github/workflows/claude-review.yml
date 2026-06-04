@@ -6,7 +6,10 @@ on:
 
 jobs:
   review:
-    if: github.actor != 'dependabot[bot]'
+    # Skip Polis's own automated PRs (branch prefix `polis/`): the orchestrator's Reviewer
+    # branch already vetted the diff, and required CI still gates the merge. Saves a
+    # redundant (and paid) AI review on every bot PR. Human PRs (feat/, fix/, ...) still run.
+    if: github.actor != 'dependabot[bot]' && !startsWith(github.head_ref, 'polis/')
     runs-on: ubuntu-latest
     permissions:
       contents: read

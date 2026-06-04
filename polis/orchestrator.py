@@ -40,6 +40,7 @@ class OrchestratorConfig:
     max_prd_revisions: int = 1      # bounded amend loop when a PRD is unconstitutional
     num_architects: int = 1         # >1 convenes a panel that proposes + votes on the PRD
     deploy_command: str | None = None  # optional shell hook run after a successful merge
+    merger: "Merger | None" = None  # how a branch reaches main (default: LocalMerger)
 
 
 class Orchestrator:
@@ -63,6 +64,10 @@ class Orchestrator:
         self.sandbox = sandbox
         self.run_store = run_store
         self.config = config or OrchestratorConfig()
+        # Merge strategy: local git merge by default; a PullRequestMerger turns merges into
+        # CI-gated GitHub PRs (never touches local main directly).
+        from .merger import LocalMerger
+        self.merger = self.config.merger or LocalMerger()
 
     # --- budget guard ---------------------------------------------------
     def _afford(self, cost: float, run_id: str) -> bool:
@@ -290,7 +295,8 @@ class Orchestrator:
                 # DECISION
                 if verdict.approved and test_result.passed:
                     try:
-                        merge_commit = ws.merge(
+                        merge_commit = self.merger.merge(
+                            ws, branch,
                             f"Polis: merge {prd.id} (run {run_id}, attempt {attempt})")
                     except MergeConflict as e:
                         ws.discard()
