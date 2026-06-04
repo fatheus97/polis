@@ -270,6 +270,20 @@ $("runForm").onsubmit = async (e) => {
   } catch (err) { toast(err.message); }
 };
 
+async function loadBranches(path) {
+  const sel = $("repoBranchSelect");
+  sel.innerHTML = '<option value="">— branch —</option>';
+  if (!path) return;
+  try {
+    const { branches } = await api("GET", `/api/branches?path=${encodeURIComponent(path)}`);
+    branches.forEach((b) => {
+      const opt = document.createElement("option");
+      opt.value = b; opt.textContent = b;
+      sel.appendChild(opt);
+    });
+  } catch (e) { /* leave text fallback editable */ }
+}
+
 async function loadConfig() {
   try {
     const c = await api("GET", "/api/config");
@@ -278,6 +292,7 @@ async function loadConfig() {
     $("cfgTesting").checked = !!c.testing_mode;
     $("cfgTicketizer").checked = !!c.ticketizer;
     $("cfgAutoRun").checked = !!c.auto_run;
+    if (!c.managed_default && c.workspace) loadBranches(c.workspace);
   } catch (e) { /* ignore */ }
 }
 function wireFlag(id, key) {
@@ -300,11 +315,28 @@ $("repoForm").onsubmit = async (e) => {
   e.preventDefault();
   const ws = $("repoPath").value.trim();
   if (ws && !confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
+  const branch = $("repoBranchSelect").value || $("repoBranch").value.trim() || null;
   try {
-    await api("POST", "/api/config", { workspace: ws, main_branch: $("repoBranch").value.trim() || null });
-    $("repoPath").value = ""; $("repoBranch").value = ""; toast("Target repo set."); loadConfig();
+    await api("POST", "/api/config", { workspace: ws, main_branch: branch });
+    $("repoPath").value = ""; $("repoBranch").value = "";
+    $("repoBranchSelect").innerHTML = '<option value="">— branch —</option>';
+    toast("Target repo set."); loadConfig();
   } catch (err) { toast(err.message); }
 };
+
+$("browsePath").onclick = async () => {
+  try {
+    const r = await fetch("/api/browse", { method: "POST" });
+    if (r.status === 200) {
+      const { path } = await r.json();
+      $("repoPath").value = path;
+      await loadBranches(path);
+    }
+    // 204 means no dialog available — text field stays editable as fallback
+  } catch (e) { /* ignore */ }
+};
+
+$("repoPath").onblur = () => { const p = $("repoPath").value.trim(); if (p) loadBranches(p); };
 
 // Restore UI state across reloads (incl. Ctrl-Shift-R): the selected run + run-row options.
 try {
