@@ -113,7 +113,7 @@ class Registry:
 
     @classmethod
     def real(cls, backend, tier: "ModelTier | None" = None,
-             testing_mode: bool = False) -> "Registry":
+             testing_mode: bool = False, dev_timeout: int = 900) -> "Registry":
         """The Phase-1 government: real, model-backed officials sharing one backend."""
         from .agents.llm_agents import (ClaudeCodeDev, LLMArchitect,
                                         LLMConstitutionalJudge, LLMReviewer)
@@ -125,7 +125,8 @@ class Registry:
                                   "LLM architect: feedback -> PRD."))
         reg.register(RoleTemplate("dev", Branch.EXECUTIVE,
                                   lambda: ClaudeCodeDev(backend, tier.dev,
-                                                        testing_mode=testing_mode),
+                                                        testing_mode=testing_mode,
+                                                        timeout=dev_timeout),
                                   "Claude Code dev: PRD -> code edits."))
         reg.register(RoleTemplate("reviewer", Branch.JUDICIAL,
                                   lambda: LLMReviewer(backend, tier.reviewer),
@@ -138,8 +139,9 @@ class Registry:
             if discipline:
                 expertise = SPECIALISTS.get(discipline, f"{discipline} engineering")
                 return ClaudeCodeDev(backend, tier.dev, specialty=expertise,
-                                     testing_mode=testing_mode)
-            return ClaudeCodeDev(backend, tier.dev, testing_mode=testing_mode)
+                                     testing_mode=testing_mode, timeout=dev_timeout)
+            return ClaudeCodeDev(backend, tier.dev, testing_mode=testing_mode,
+                                 timeout=dev_timeout)
 
         reg._dev_factory = _hire
         return reg

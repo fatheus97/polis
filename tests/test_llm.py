@@ -47,5 +47,18 @@ class ExtractJsonTest(unittest.TestCase):
             extract_json("no json here")
 
 
+class TimeoutTest(unittest.TestCase):
+    def test_timeout_fails_fast_and_honors_per_call_override(self):
+        import subprocess
+        from unittest.mock import patch
+        b = ClaudeCliBackend(timeout=300, max_retries=3, retry_base=0)
+        with patch("subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("claude", 5)) as m:
+            with self.assertRaises(LLMError) as cm:
+                b.complete("hi", timeout=5)          # per-call override
+        self.assertEqual(m.call_count, 1)            # a timeout is NOT retried
+        self.assertIn("timed out after 5s", str(cm.exception))  # used the per-call value
+
+
 if __name__ == "__main__":
     unittest.main()

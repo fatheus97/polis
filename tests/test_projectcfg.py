@@ -56,16 +56,25 @@ class ProjectCfgTest(unittest.TestCase):
         self.assertEqual(ov, {"architect": "opus", "dev": "opus"})
         self.assertEqual(ModelTier(**ov).reviewer, "sonnet")  # an unset role keeps its default
 
-    def test_build_government_uses_config_models(self):
+    def test_dev_timeout_config(self):
+        self.assertEqual(projectcfg.resolve_dev_timeout(self.base), 900)  # default
+        projectcfg.write_config(self.base, {"dev_timeout": 1800})
+        self.assertEqual(projectcfg.resolve_dev_timeout(self.base), 1800)
+        projectcfg.write_config(self.base, {"dev_timeout": "bad"})
+        self.assertEqual(projectcfg.resolve_dev_timeout(self.base), 900)  # bad -> default
+
+    def test_build_government_uses_config_models_and_timeout(self):
         from polis.app import build_government
         from polis.llm import FakeLLM
-        projectcfg.write_config(self.base, {"dev_model": "opus"})
+        projectcfg.write_config(self.base, {"dev_model": "opus", "dev_timeout": 1500})
 
         class FakeWS:
             path = "/not-the-polis-repo"
         gov = build_government(self.base, agents="real", backend=FakeLLM([]), workspace=FakeWS())
         try:
-            self.assertEqual(gov.registry.hire_dev().model, "opus")          # from config
+            dev = gov.registry.hire_dev()
+            self.assertEqual(dev.model, "opus")             # model from config
+            self.assertEqual(dev.timeout, 1500)             # dev_timeout from config
             self.assertEqual(gov.registry.spawn("architect").model, "sonnet")  # default
         finally:
             gov.close()

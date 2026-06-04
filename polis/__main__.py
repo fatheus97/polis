@@ -21,6 +21,13 @@ from .registry import ModelTier
 from .sandbox import DockerSandbox, LocalSandbox
 
 
+def _positive_seconds(s: str) -> int:
+    v = int(s)
+    if v <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return v
+
+
 def _fmt_result(res) -> str:
     bits = [
         f"[{res.outcome.value}]",
@@ -117,6 +124,8 @@ def main(argv=None) -> int:
                       help="model for the dev that writes the code (default sonnet)")
     pcfg.add_argument("--review-model", default=None,
                       help="model for the reviewer")
+    pcfg.add_argument("--dev-timeout", type=_positive_seconds, default=None,
+                      help="seconds the agentic dev (Claude Code) may run per attempt (default 900)")
 
     args = p.parse_args(argv)
 
@@ -133,7 +142,7 @@ def main(argv=None) -> int:
                      open_browser=not args.no_browser)
 
     if args.cmd == "config":
-        from .projectcfg import (is_managed_default, resolve_auto_run,
+        from .projectcfg import (is_managed_default, resolve_auto_run, resolve_dev_timeout,
                                  resolve_main_branch, resolve_merge_via_pr,
                                  resolve_model_tier_overrides, resolve_real_runs,
                                  resolve_testing_mode, resolve_ticketizer,
@@ -157,6 +166,8 @@ def main(argv=None) -> int:
                            ("dev_model", args.dev_model), ("review_model", args.review_model)):
             if mval is not None:
                 updates[mkey] = mval.strip()
+        if args.dev_timeout is not None:
+            updates["dev_timeout"] = args.dev_timeout
         if updates:
             write_config(args.base, updates)
         tag = "managed default" if is_managed_default(args.base) else "configured"
@@ -168,7 +179,8 @@ def main(argv=None) -> int:
               f"real_runs : {resolve_real_runs(args.base)}   "
               f"merge_via_pr : {resolve_merge_via_pr(args.base)}")
         t = ModelTier(**resolve_model_tier_overrides(args.base))
-        print(f"models       : architect={t.architect}  dev={t.dev}  reviewer={t.reviewer}")
+        print(f"models       : architect={t.architect}  dev={t.dev}  reviewer={t.reviewer}"
+              f"   dev_timeout={resolve_dev_timeout(args.base)}s")
         return 0
 
     config = None

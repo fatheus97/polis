@@ -162,13 +162,17 @@ class LLMArchitect(Architect):
 class ClaudeCodeDev(Dev):
     def __init__(self, backend: LLMBackend, model: str = "haiku",
                  permission_mode: str = "acceptEdits", cost_estimate: float = 1.50,
-                 specialty: str | None = None, testing_mode: bool = False):
+                 specialty: str | None = None, testing_mode: bool = False,
+                 timeout: int = 900):
         super().__init__("dev", Branch.EXECUTIVE, cost_estimate)
         self.backend = backend
         self.model = model
         self.permission_mode = permission_mode
         self.specialty = specialty
         self.testing_mode = testing_mode
+        # The dev is agentic Claude Code (edits many files + runs tests), so it needs far longer
+        # than the architect/reviewer's single completions; 300s was timing real features out.
+        self.timeout = timeout
 
     def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
         if workspace is None:
@@ -186,6 +190,7 @@ class ClaudeCodeDev(Dev):
         resp = self.backend.complete(
             "\n".join(parts), system=system, model=self.model,
             cwd=str(workspace.path), permission_mode=self.permission_mode,
+            timeout=self.timeout,
         )
         self.last_cost = resp.cost_usd
         changes = workspace.changed_files() if hasattr(workspace, "changed_files") else []
