@@ -21,6 +21,13 @@ from .registry import ModelTier
 from .sandbox import DockerSandbox, LocalSandbox
 
 
+def _positive_seconds(s: str) -> int:
+    v = int(s)
+    if v <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return v
+
+
 def _fmt_result(res) -> str:
     bits = [
         f"[{res.outcome.value}]",
@@ -117,7 +124,7 @@ def main(argv=None) -> int:
                       help="model for the dev that writes the code (default sonnet)")
     pcfg.add_argument("--review-model", default=None,
                       help="model for the reviewer")
-    pcfg.add_argument("--dev-timeout", type=int, default=None,
+    pcfg.add_argument("--dev-timeout", type=_positive_seconds, default=None,
                       help="seconds the agentic dev (Claude Code) may run per attempt (default 900)")
 
     args = p.parse_args(argv)
