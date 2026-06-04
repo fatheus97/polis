@@ -1,6 +1,6 @@
 [project]
 name = "polis"
-version = "0.3.0"
+version = "0.4.0"
 description = "A separation-of-powers multi-agent coding system."
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -145,6 +145,9 @@ py -m polis --base .polis-dog dashboard      # click the 🐞 button to file a r
 - **Phase 3** ✅ — parallel PRDs on git worktrees; model decorrelation; deploy hooks.
 - **Phase 4** ✅ — autonomous tester feedback loop: in-app widget → intake → Clerk ticketizer →
   architect feedback; a protect-core guard for self-development.
+- **Phase 5** ✅ — opt-in **PR-based merge** (`config --merge-via-pr on`): Polis lands changes
+  by pushing a branch and opening a CI-gated GitHub PR (push → wait for required checks →
+  squash-merge), never touching local `main` directly — so it works like a careful contributor.
 
 ## License
 
