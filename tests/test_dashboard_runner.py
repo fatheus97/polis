@@ -151,5 +151,46 @@ class ClerkFlowTest(unittest.TestCase):
         self.assertIs(self._capture_auto_run(real_runs=False).get("real"), False)
 
 
+class RetryRunTest(unittest.TestCase):
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="polis-retry-"))
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.rm = RunManager(self.base)
+
+    def tearDown(self):
+        self.rm.shutdown()
+
+    def _escalated(self, run_id="run-x", text="add a thing"):
+        from polis.models import Stage
+        from polis.record import Record
+        rec = Record(self.base / "record.jsonl")
+        rec.append(run_id=run_id, stage=Stage.INTAKE, actor="procedure", kind="intake",
+                   feedback_id="fb-orig", text=text)
+        rec.append(run_id=run_id, stage=Stage.ESCALATE, actor="procedure", kind="escalate",
+                   reason="revisions_exhausted after 2 revisions")
+
+    def test_retry_carries_guidance_and_reruns(self):
+        self._escalated()
+        calls = []
+        self.rm.trigger_run = lambda **kw: (calls.append(kw), {"job_id": "j", "status": "queued"})[1]
+        res = self.rm.retry_run("run-x", "make it server-side")
+        self.assertTrue(res.get("feedback_id"))
+        txt = reader.read_pending_feedback(self.base)[-1]["text"]
+        self.assertIn("add a thing", txt)            # original ask carried forward
+        self.assertIn("make it server-side", txt)    # the sovereign's guidance
+        self.assertTrue(calls and calls[0]["feedback_id"] == res["feedback_id"])  # re-run fired
+
+    def test_retry_rejects_non_escalated_and_empty(self):
+        from polis.models import Stage
+        from polis.record import Record
+        Record(self.base / "record.jsonl").append(
+            run_id="run-ok", stage=Stage.INTAKE, actor="procedure", kind="intake",
+            feedback_id="fb", text="x")  # no escalate event
+        self.assertEqual(self.rm.retry_run("nope", "go").get("error"), "run not found")
+        self.assertIn("escalated", self.rm.retry_run("run-ok", "go").get("error", ""))
+        self._escalated("run-e")
+        self.assertIn("guidance", self.rm.retry_run("run-e", "   ").get("error", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

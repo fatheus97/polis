@@ -63,6 +63,10 @@ class DashboardServerTest(unittest.TestCase):
     def test_unknown_run_detail_404(self):
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
 
+    def test_retry_unknown_run_404(self):
+        r = self.client.post("/api/runs/nope/retry", json={"guidance": "do x"})
+        self.assertEqual(r.status_code, 404)
+
     def test_config_get_default(self):
         c = self.client.get("/api/config").json()
         self.assertTrue(c["managed_default"])
