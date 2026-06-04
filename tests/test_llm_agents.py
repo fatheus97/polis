@@ -156,5 +156,16 @@ class RealAgentsCostAccountingTest(unittest.TestCase):
         self.assertEqual(len(ws.merges), 0)
 
 
+class RenderDiffTest(unittest.TestCase):
+    def test_reviewer_sees_full_moderate_files(self):
+        from polis.agents.llm_agents import _render_diff
+        body = "def f():\n    return 1\n" * 300            # ~6.6 KB — a realistic source file
+        out = _render_diff(Diff(changes=[FileChange("a.py", body)]))
+        self.assertIn(body, out)                            # the WHOLE file reaches the reviewer
+        self.assertNotIn("[truncated]", out)
+        huge = "z\n" * 15000                                # ~30 KB > per-file cap
+        self.assertIn("[truncated]", _render_diff(Diff(changes=[FileChange("b.py", huge)])))
+
+
 if __name__ == "__main__":
     unittest.main()

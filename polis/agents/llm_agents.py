@@ -87,7 +87,10 @@ CONSTITUTIONAL_SYSTEM = (
 )
 
 
-def _render_diff(diff: Diff, per_file: int = 1500, total: int = 8000) -> str:
+def _render_diff(diff: Diff, per_file: int = 20000, total: int = 80000) -> str:
+    # The reviewer must actually SEE the code to verify it — a 1500-char/file cap made it
+    # reject real multi-file features as "truncated, cannot verify". Sonnet's context easily
+    # holds tens of KB; only genuinely huge diffs are trimmed now.
     out, used = [], 0
     for ch in diff.changes:
         body = ch.content[:per_file]
@@ -212,7 +215,7 @@ class LLMReviewer(Reviewer):
             f"\nTest result: {'PASS' if test_result.passed else 'FAIL'} — {test_result.summary}",
         ]
         if test_result.details:
-            parts.append(f"\nTest output (tail):\n{test_result.details[-1000:]}")
+            parts.append(f"\nTest output (tail):\n{test_result.details[-2000:]}")
         parts.append(f"\nChanged files:\n{_render_diff(diff)}")
         if violations:
             scan = ", ".join(f"{v.rule_id}({v.severity}) in {v.path}" for v in violations)
