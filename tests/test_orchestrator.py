@@ -24,6 +24,12 @@ class HappyPathTest(unittest.TestCase):
         self.assertEqual(len(h.workspace.merges), 1)
         self.assertEqual(res.attempts, 0)
 
+        # The merge message reads as version history: PRD title (line 1) + goal + traceability.
+        msg = h.workspace.merges[0][0]
+        self.assertTrue(msg.startswith("add a health endpoint"))  # PRD title, not "Polis: merge …"
+        self.assertIn("Implement: add a health endpoint", msg)    # the PRD goal
+        self.assertIn("— PRD prd", msg)                           # traceability footer
+
         # The procedure visited every stage in order.
         kinds = h.kinds()
         for k in ("intake", "prd", "diff", "test_result", "verdict", "merge", "done"):

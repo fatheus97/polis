@@ -294,10 +294,15 @@ class Orchestrator:
 
                 # DECISION
                 if verdict.approved and test_result.passed:
+                    # A descriptive title + body so the merge commit / PR reads as version
+                    # history (not "Polis: merge prd-xxxx"). The merger uses line 1 as the title.
+                    crit = "\n".join(f"- {c}" for c in (prd.acceptance_criteria or [])[:6])
+                    message = (
+                        f"{prd.title or prd.id}\n\n{(prd.goal or '').strip()}\n\n"
+                        + (f"Acceptance criteria:\n{crit}\n\n" if crit else "")
+                        + f"— PRD {prd.id} · run {run_id} · attempt {attempt} (opened by Polis)")
                     try:
-                        merge_commit = self.merger.merge(
-                            ws, branch,
-                            f"Polis: merge {prd.id} (run {run_id}, attempt {attempt})")
+                        merge_commit = self.merger.merge(ws, branch, message)
                     except MergeConflict as e:
                         ws.discard()
                         return result(Stage.ESCALATE, Stage.MERGE, f"merge_conflict: {e}")
