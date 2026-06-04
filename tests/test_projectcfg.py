@@ -111,6 +111,11 @@ class ProjectCfgTest(unittest.TestCase):
         finally:
             gov2.close()
 
+    def test_restart_on_merge_default_off_and_config(self):
+        self.assertFalse(projectcfg.resolve_restart_on_merge(self.base))   # default off
+        projectcfg.write_config(self.base, {"restart_on_merge": True})
+        self.assertTrue(projectcfg.resolve_restart_on_merge(self.base))
+
     def test_merge_via_pr_default_off_and_injection(self):
         from polis.app import build_government
         from polis.merger import LocalMerger, PullRequestMerger

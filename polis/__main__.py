@@ -114,6 +114,8 @@ def main(argv=None) -> int:
                       help="dashboard runs use real LLM agents (default on) vs free stub runs")
     pcfg.add_argument("--merge-via-pr", choices=["on", "off"], default=None,
                       help="land changes via a CI-gated GitHub PR instead of a local merge (needs origin+gh+CI)")
+    pcfg.add_argument("--restart-on-merge", choices=["on", "off"], default=None,
+                      help="auto-restart the dashboard after it merges a change to its own checkout (self-dev)")
     pcfg.add_argument("--intake-url", default=None,
                       help="absolute intake URL baked into the served widget (for external apps)")
     pcfg.add_argument("--intake-origins", default=None,
@@ -145,8 +147,8 @@ def main(argv=None) -> int:
         from .projectcfg import (is_managed_default, resolve_auto_run, resolve_dev_timeout,
                                  resolve_main_branch, resolve_merge_via_pr,
                                  resolve_model_tier_overrides, resolve_real_runs,
-                                 resolve_testing_mode, resolve_ticketizer,
-                                 resolve_workspace, write_config)
+                                 resolve_restart_on_merge, resolve_testing_mode,
+                                 resolve_ticketizer, resolve_workspace, write_config)
         updates = {}
         if args.repo is not None:
             # "" clears it (reset to managed default); avoid Path("").resolve() == CWD.
@@ -155,7 +157,8 @@ def main(argv=None) -> int:
             updates["main_branch"] = args.main_branch
         for flag, val in (("testing_mode", args.testing_mode), ("auto_run", args.auto_run),
                           ("ticketizer", args.ticketizer), ("real_runs", args.real_runs),
-                          ("merge_via_pr", args.merge_via_pr)):
+                          ("merge_via_pr", args.merge_via_pr),
+                          ("restart_on_merge", args.restart_on_merge)):
             if val is not None:
                 updates[flag] = (val == "on")
         if args.intake_url is not None:
@@ -177,7 +180,8 @@ def main(argv=None) -> int:
               f"auto_run : {resolve_auto_run(args.base)}   "
               f"ticketizer : {resolve_ticketizer(args.base)}   "
               f"real_runs : {resolve_real_runs(args.base)}   "
-              f"merge_via_pr : {resolve_merge_via_pr(args.base)}")
+              f"merge_via_pr : {resolve_merge_via_pr(args.base)}   "
+              f"restart_on_merge : {resolve_restart_on_merge(args.base)}")
         t = ModelTier(**resolve_model_tier_overrides(args.base))
         print(f"models       : architect={t.architect}  dev={t.dev}  reviewer={t.reviewer}"
               f"   dev_timeout={resolve_dev_timeout(args.base)}s")

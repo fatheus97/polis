@@ -6,6 +6,8 @@ writes/runs go through a single RunManager (serialized). Binds 127.0.0.1 by defa
 
 from __future__ import annotations
 
+import mimetypes
+import os
 import subprocess
 import threading
 import webbrowser
@@ -16,7 +18,6 @@ import json
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..projectcfg import (is_managed_default, read_config, resolve_auto_run,
@@ -30,9 +31,40 @@ from .runner import RunManager
 MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
 _IMG_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif"}
 
+# Explicit MIME map so the served JS is always `application/javascript` — Windows' registry
+# can map `.js` to `text/plain`, which browsers refuse to execute under nosniff.
+_MEDIA = {".js": "application/javascript", ".mjs": "application/javascript",
+          ".css": "text/css", ".html": "text/html; charset=utf-8",
+          ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png",
+          ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+          ".gif": "image/gif", ".ico": "image/x-icon", ".woff2": "font/woff2",
+          ".map": "application/json", ".txt": "text/plain; charset=utf-8"}
+
+# A child dashboard exits with this code to tell its supervisor "a self-dev change merged —
+# relaunch me with the new code" (see serve()/_supervise()). Any other code is final.
+_RESTART_EXIT_CODE = 97
+
 
 def _static_dir() -> Path:
     return Path(__file__).resolve().parent / "static"
+
+
+def _media_type(name: str) -> str:
+    return _MEDIA.get(Path(name).suffix.lower()) or mimetypes.guess_type(name)[0] \
+        or "application/octet-stream"
+
+
+def _snapshot_static(static: Path) -> dict[str, bytes]:
+    """Read every static asset into memory ONCE, at startup. When the dashboard is served
+    from the same checkout Polis develops (the self-dev loop), a run rewrites these files in
+    the working tree MID-RUN — serving from this frozen snapshot keeps the live UI stable and
+    valid until a deliberate restart (see restart_on_merge) applies the new version."""
+    snap: dict[str, bytes] = {}
+    if static.exists():
+        for p in sorted(static.rglob("*")):
+            if p.is_file():
+                snap[p.relative_to(static).as_posix()] = p.read_bytes()
+    return snap
 
 
 class FeedbackIn(BaseModel):
@@ -77,7 +109,9 @@ def create_app(base) -> FastAPI:
 
     app = FastAPI(title="Polis Dashboard", docs_url="/api/docs", lifespan=lifespan)
     app.state.run_manager = rm
-    static = _static_dir()
+    # Freeze the UI assets at startup so a self-dev run rewriting them can't corrupt the
+    # live page mid-run (the freeze that made the dashboard look "unresponsive").
+    assets = _snapshot_static(_static_dir())
 
     # CORS is scoped to ONLY the intake endpoint (a widget embedded in an external app posts
     # cross-origin). The action endpoints (/api/run, /api/budget, /api/feedback) deliberately
@@ -103,16 +137,14 @@ def create_app(base) -> FastAPI:
     # --- reads (no side effects) -----------------------------------------
     @app.get("/")
     def index():
-        idx = static / "index.html"
-        if idx.exists():
-            html = idx.read_text(encoding="utf-8")
-            testing_mode = resolve_testing_mode(base)
-            widget_script = ''
-            if testing_mode:
-                widget_script = '<script src="/static/feedback-widget.js"></script>'
-            html = html.replace('<!-- FEEDBACK_WIDGET_PLACEHOLDER -->', widget_script)
-            return Response(html, media_type="text/html")
-        return JSONResponse({"error": "frontend not built"}, status_code=404)
+        raw = assets.get("index.html")
+        if raw is None:
+            return JSONResponse({"error": "frontend not built"}, status_code=404)
+        html = raw.decode("utf-8")
+        widget_script = ('<script src="/static/feedback-widget.js"></script>'
+                         if resolve_testing_mode(base) else '')
+        html = html.replace('<!-- FEEDBACK_WIDGET_PLACEHOLDER -->', widget_script)
+        return Response(html, media_type="text/html")
 
     @app.get("/api/overview")
     def overview():
@@ -309,28 +341,56 @@ def create_app(base) -> FastAPI:
 
     # Templated widget: prepend the configured intake URL so external apps can embed
     # <script src="http://<host>:8765/static/feedback-widget.js">. Declared BEFORE the
-    # StaticFiles mount so this explicit route wins.
+    # catch-all static route so this explicit route wins.
     @app.get("/static/feedback-widget.js")
     def widget_js():
-        path = static / "feedback-widget.js"
-        if not path.exists():
+        raw = assets.get("feedback-widget.js")
+        if raw is None:
             raise HTTPException(404, "widget not found")
-        js = path.read_text(encoding="utf-8")
         intake = resolve_intake_url(base)
         header = f"window.__POLIS_INTAKE_URL={json.dumps(intake)};\n" if intake else ""
-        return Response(header + js, media_type="application/javascript")
+        return Response(header + raw.decode("utf-8"), media_type="application/javascript")
 
-    if static.exists():
-        app.mount("/static", StaticFiles(directory=str(static)), name="static")
+    # Serve every other asset from the in-memory startup snapshot (not the live working
+    # tree), so a self-dev run editing app.js/index.html can't break the running UI. Pure
+    # dict lookup — no filesystem touch at request time, so `..` can't traverse out.
+    @app.get("/static/{path:path}")
+    def static_asset(path: str):
+        raw = assets.get(path)
+        if raw is None:
+            raise HTTPException(404, "not found")
+        return Response(raw, media_type=_media_type(path))
+
     return app
 
 
 def serve(base, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True):
+    from ..projectcfg import resolve_restart_on_merge
+    supervised = os.environ.get("POLIS_DASH_SUPERVISED") == "1"
+    # restart_on_merge: a thin supervisor relaunches the dashboard after it merges a change
+    # to its OWN checkout, so the new code/UI is applied without a manual restart. The
+    # supervisor runs the real dashboard as a child; the child signals via exit code.
+    if resolve_restart_on_merge(base) and not supervised:
+        return _supervise(base, host, port, open_browser)
+
     import uvicorn
     app = create_app(base)
     url = f"http://{host}:{port}/"
-    if open_browser:
+    if open_browser and not supervised:   # the supervisor opens the browser once itself
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+    restart = {"flag": False}
+    if supervised:
+        # Arm the restart: after a merge to our own checkout, ask uvicorn to exit gracefully
+        # (its lifespan drains the in-flight run), then signal the supervisor to relaunch. The
+        # 2s delay lets the browser's last poll render the merge before the brief blip.
+        def _request_restart():
+            restart["flag"] = True
+            server.should_exit = True
+        app.state.run_manager.set_restart_hook(
+            lambda: threading.Timer(2.0, _request_restart).start())
+
     print(f"Polis dashboard → {url}  (base: {Path(base).resolve()})")
     # One-time heads-up: real-vs-stub defaults to REAL. Only warn when it isn't explicitly
     # set in config, so a user who has made a deliberate choice isn't nagged.
@@ -338,8 +398,32 @@ def serve(base, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = 
         print("  ⚠ dashboard runs use REAL LLM agents by default ($). Switch to free "
               "stubs:  py -m polis --base <base> config --real-runs off")
     try:
-        uvicorn.run(app, host=host, port=port, log_level="warning")
+        server.run()
     except OSError as e:
         print(f"Could not bind {host}:{port} ({e}). Try another --port.")
         return 1
+    if restart["flag"]:
+        print("  ↻ a self-dev change merged — exiting for the supervisor to relaunch…")
+        return _RESTART_EXIT_CODE
     return 0
+
+
+def _supervise(base, host: str, port: int, open_browser: bool) -> int:
+    """Parent process for restart_on_merge: run the dashboard as a child and relaunch it
+    whenever it exits with _RESTART_EXIT_CODE (a self-dev change merged). Any other exit
+    code is final and propagated. A child process + exit code is robust across platforms,
+    unlike os.execv on Windows."""
+    import sys
+    import time
+    argv = [sys.executable, "-m", "polis", "--base", str(base), "dashboard",
+            "--host", host, "--port", str(port), "--no-browser"]
+    env = dict(os.environ, POLIS_DASH_SUPERVISED="1")
+    print(f"Polis dashboard (auto-restart on merge) → http://{host}:{port}/")
+    if open_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(f"http://{host}:{port}/")).start()
+    while True:
+        code = subprocess.run(argv, env=env).returncode
+        if code != _RESTART_EXIT_CODE:
+            return code
+        time.sleep(0.4)  # let the listen socket fully release before the child rebinds
+        print("  ↻ restarting dashboard to apply the merged change…")

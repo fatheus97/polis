@@ -22,6 +22,21 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
+def _is_self_dev(base) -> bool:
+    """True when the dashboard is serving from the SAME checkout Polis is developing — i.e.
+    a merge changed the very code this process runs, so a restart is needed to apply it.
+    (When Polis develops a *different* repo, restarting the dashboard would show nothing —
+    that's what the deploy hook is for.)"""
+    import polis
+    from ..projectcfg import resolve_workspace
+    try:
+        pkg = Path(polis.__file__).resolve().parent          # .../<checkout>/polis
+        ws = Path(resolve_workspace(base)).resolve()
+        return pkg.is_relative_to(ws)
+    except Exception:
+        return False
+
+
 def _summarize_state(state: dict) -> dict:
     """A compact, architect-friendly digest of the captured web state (the full state
     stays in the report; this rides on the feedback item's directives)."""
@@ -47,6 +62,15 @@ class RunManager:
         self._max_jobs = 200                                # bound the in-memory history
         self._clerk_executor = ThreadPoolExecutor(max_workers=1)  # distillation, off the run path
         self._clerk_backend_factory = None                  # test seam (default ClaudeCliBackend)
+        self._restart_hook = None                           # set by serve() when restart_on_merge
+
+    def set_restart_hook(self, fn) -> None:
+        """Wired by serve() under restart_on_merge: invoked after a run merges a change to our
+        own checkout, so the supervisor can relaunch the dashboard with the new code."""
+        self._restart_hook = fn
+
+    def _should_restart(self, res) -> bool:
+        return bool(self._restart_hook) and getattr(res, "merged", False) and _is_self_dev(self.base)
 
     # --- write actions (called on request threads) -------------------------
     def submit_feedback(self, text: str, by: str = "tester", directives=None) -> dict:
@@ -198,6 +222,7 @@ class RunManager:
                 constitutional_review=bool(opts.get("constitution_court", False)),
             )
             gov = build_government(self.base, agents="real" if real else "stub", config=cfg)
+            restart = False
             try:
                 if feedback_id:
                     item = next((it for it in gov.inbox.pending()
@@ -213,8 +238,14 @@ class RunManager:
                 gov.inbox.mark_processed(item.id, res.run_id)
                 self._set(job_id, status="done", run_id=res.run_id,
                           outcome=res.outcome.value, reason=res.reason)
+                restart = self._should_restart(res)
             finally:
                 gov.close()  # release SQLite handles (Windows file locks)
+            if restart:
+                # A change merged into our own running checkout — ask the supervisor to
+                # relaunch so the new code/UI is applied. Done AFTER gov.close() so the
+                # record/treasury writes are flushed first.
+                self._restart_hook()
         except Exception as e:  # never let a job crash the worker
             self._set(job_id, status="error", error=str(e)[:300])
 
