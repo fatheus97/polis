@@ -22,8 +22,8 @@ from pydantic import BaseModel
 
 from ..projectcfg import (is_managed_default, read_config, resolve_auto_run,
                           resolve_intake_origins, resolve_intake_url, resolve_main_branch,
-                          resolve_real_runs, resolve_testing_mode, resolve_ticketizer,
-                          resolve_workspace, write_config)
+                          resolve_real_runs, resolve_restart_on_merge, resolve_testing_mode,
+                          resolve_ticketizer, resolve_workspace, write_config)
 from ..reports import ReportStore
 from . import data, reader
 from .runner import RunManager
@@ -58,7 +58,10 @@ def _snapshot_static(static: Path) -> dict[str, bytes]:
     """Read every static asset into memory ONCE, at startup. When the dashboard is served
     from the same checkout Polis develops (the self-dev loop), a run rewrites these files in
     the working tree MID-RUN — serving from this frozen snapshot keeps the live UI stable and
-    valid until a deliberate restart (see restart_on_merge) applies the new version."""
+    valid until a deliberate restart (see restart_on_merge) applies the new version.
+
+    Assumes small UI assets (the dashboard frontend is ~100 KB) — everything under static/ is
+    held in process memory; not intended for large bundles (WASM, big fonts)."""
     snap: dict[str, bytes] = {}
     if static.exists():
         for p in sorted(static.rglob("*")):
@@ -140,7 +143,7 @@ def create_app(base) -> FastAPI:
         raw = assets.get("index.html")
         if raw is None:
             return JSONResponse({"error": "frontend not built"}, status_code=404)
-        html = raw.decode("utf-8")
+        html = raw.decode("utf-8", errors="replace")   # never 500 on a stray non-UTF-8 byte
         widget_script = ('<script src="/static/feedback-widget.js"></script>'
                          if resolve_testing_mode(base) else '')
         html = html.replace('<!-- FEEDBACK_WIDGET_PLACEHOLDER -->', widget_script)
@@ -349,7 +352,8 @@ def create_app(base) -> FastAPI:
             raise HTTPException(404, "widget not found")
         intake = resolve_intake_url(base)
         header = f"window.__POLIS_INTAKE_URL={json.dumps(intake)};\n" if intake else ""
-        return Response(header + raw.decode("utf-8"), media_type="application/javascript")
+        js = raw.decode("utf-8", errors="replace")     # never 500 on a stray non-UTF-8 byte
+        return Response(header + js, media_type="application/javascript")
 
     # Serve every other asset from the in-memory startup snapshot (not the live working
     # tree), so a self-dev run editing app.js/index.html can't break the running UI. Pure
@@ -365,7 +369,6 @@ def create_app(base) -> FastAPI:
 
 
 def serve(base, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True):
-    from ..projectcfg import resolve_restart_on_merge
     supervised = os.environ.get("POLIS_DASH_SUPERVISED") == "1"
     # restart_on_merge: a thin supervisor relaunches the dashboard after it merges a change
     # to its OWN checkout, so the new code/UI is applied without a manual restart. The

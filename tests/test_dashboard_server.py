@@ -186,6 +186,8 @@ class DashboardServerTest(unittest.TestCase):
     def test_supervise_relaunches_on_restart_code_then_stops(self):
         # The supervisor relaunches the child while it exits with _RESTART_EXIT_CODE (a
         # self-dev merge), and stops + propagates any other exit code.
+        # _supervise itself uses no FastAPI, but it lives in server.py (can't import without
+        # the extra), so this test is gated on HAVE_FASTAPI like the rest of the class.
         import types as _t
 
         import polis.dashboard.server as srv
@@ -206,6 +208,22 @@ class DashboardServerTest(unittest.TestCase):
             srv.subprocess.run = orig
         self.assertEqual(code, 0)        # the final (non-restart) code is propagated
         self.assertEqual(calls["n"], 3)  # relaunched twice (97, 97), then exited on 0
+
+    def test_text_routes_survive_non_utf8_bytes(self):
+        # index/widget decode bytes -> str; a stray non-UTF-8 byte must degrade (errors=replace),
+        # never 500.
+        import polis.dashboard.server as srv
+        tmp = Path(tempfile.mkdtemp(prefix="polis-enc-"))
+        (tmp / "index.html").write_bytes(b"<html>\xff\xfe caf\xe9 <!-- FEEDBACK_WIDGET_PLACEHOLDER --></html>")
+        (tmp / "feedback-widget.js").write_bytes(b"// caf\xe9\nconsole.log(1);")
+        orig = srv._static_dir
+        srv._static_dir = lambda: tmp
+        try:
+            client = TestClient(srv.create_app(Path(tempfile.mkdtemp(prefix="polis-encbase-"))))
+        finally:
+            srv._static_dir = orig
+        self.assertEqual(client.get("/").status_code, 200)
+        self.assertEqual(client.get("/static/feedback-widget.js").status_code, 200)
 
     def test_static_js_served_as_javascript(self):
         # Windows' registry can map .js -> text/plain (browsers won't execute it); we force
