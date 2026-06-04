@@ -104,7 +104,8 @@ def resolve_grounded_agents(base) -> bool:
 
 def resolve_dev_timeout(base) -> int:
     """Seconds the agentic dev (Claude Code) may run per attempt before timing out (default 900).
-    The architect/reviewer keep the backend's shorter default."""
+    The architect keeps the backend's shorter default; a grounded reviewer uses its own 600s
+    window (its agentic Read/Grep can outlast the 300s one-shot default)."""
     try:
         v = int(read_config(base).get("dev_timeout", 900))
     except (TypeError, ValueError):
