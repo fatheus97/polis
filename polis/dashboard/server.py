@@ -100,7 +100,13 @@ def create_app(base) -> FastAPI:
     def index():
         idx = static / "index.html"
         if idx.exists():
-            return FileResponse(idx)
+            html = idx.read_text(encoding="utf-8")
+            testing_mode = resolve_testing_mode(base)
+            widget_script = ''
+            if testing_mode:
+                widget_script = '<script src="/static/feedback-widget.js"></script>'
+            html = html.replace('<!-- FEEDBACK_WIDGET_PLACEHOLDER -->', widget_script)
+            return Response(html, media_type="text/html")
         return JSONResponse({"error": "frontend not built"}, status_code=404)
 
     @app.get("/api/overview")

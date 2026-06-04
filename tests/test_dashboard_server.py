@@ -142,6 +142,28 @@ class DashboardServerTest(unittest.TestCase):
         evs = self.client.get("/api/events?since_ts=0&tail=10").json()["events"]
         self.assertLessEqual(len(evs), 10)
 
+    def test_feedback_widget_included_when_testing_mode_on(self):
+        # Feedback widget script should be in HTML when TESTING_MODE is on
+        from polis.projectcfg import write_config
+        write_config(self.base, {"testing_mode": True})
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('<script src="/static/feedback-widget.js"></script>', r.text)
+
+    def test_feedback_widget_not_included_when_testing_mode_off(self):
+        # Feedback widget should not be in HTML when TESTING_MODE is off
+        from polis.projectcfg import write_config
+        write_config(self.base, {"testing_mode": False})
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn('<script src="/static/feedback-widget.js"></script>', r.text)
+
+    def test_feedback_widget_placeholder_removed_from_html(self):
+        # The placeholder comment should be completely removed from HTML
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn('FEEDBACK_WIDGET_PLACEHOLDER', r.text)
+
 
 @unittest.skipUnless(HAVE_FASTAPI and HAVE_GIT, "needs the dashboard extra + git")
 class DashboardRunFlowTest(unittest.TestCase):
