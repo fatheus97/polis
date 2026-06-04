@@ -35,10 +35,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Pinned by SHA to v1.0.112 (a known-good release): the floating `v1` tag
-      # was advanced to a build whose native installer is broken
-      # (anthropics/claude-code-action#1254). Bump once that is resolved upstream.
-      - uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2
+      # Pinned by SHA to v1.0.135. The earlier v1.0.112 pin began failing in June 2026 when
+      # its bundled Bun (1.3.6) hit an internal "directory mismatch … indicates a bug" crash
+      # that aborted the review with no comment; v1.0.135 ships a working Bun.
+      - uses: anthropics/claude-code-action@70a6e5256e9e2366a1ed5c041904a982ba3a328f
         if: steps.gate.outputs.enabled == 'true'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
