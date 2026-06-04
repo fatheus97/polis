@@ -3,6 +3,7 @@ calls, no cost. Covers JSON parsing, graceful degradation, the dev capturing
 workspace edits, and the reviewer's HARD GATES overriding a lenient model.
 """
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -51,7 +52,9 @@ class ArchitectGroundingTest(unittest.TestCase):
         return FeedbackItem(text="the headings are too close to the left edge", directives=directives)
 
     def test_grounded_architect_reads_repo_and_screenshot(self):
-        shot = Path(tempfile.mkdtemp(prefix="polis-shot-")) / "s.png"
+        d = Path(tempfile.mkdtemp(prefix="polis-shot-"))
+        self.addCleanup(shutil.rmtree, str(d), ignore_errors=True)
+        shot = d / "s.png"
         shot.write_bytes(b"\x89PNG\r\n")
         fake = FakeLLM([LLMResponse(text=PRD_JSON, cost_usd=0.2)])
         LLMArchitect(fake, grounded=True).write_prd(self._fb(screenshot_path=str(shot)), cwd="/repo")
