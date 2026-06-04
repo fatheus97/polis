@@ -206,9 +206,13 @@ def main(argv=None) -> int:
         )
         if args.real:
             from .projectcfg import resolve_model_tier_overrides
-            # precedence: per-role flag > --model > config (architect_model/…) > default
-            tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)
-                    if args.model else ModelTier(**resolve_model_tier_overrides(args.base)))
+            base_overrides = resolve_model_tier_overrides(args.base)
+            # precedence: per-role flag > --model > config (architect_model/…) > default.
+            # A bare --model overrides the three role models but must NOT drop a configured
+            # dev_plan_model (plan-then-execute is orthogonal to which model executes).
+            tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model,
+                              dev_plan_model=base_overrides.get("dev_plan_model"))
+                    if args.model else ModelTier(**base_overrides))
             if args.architect_model:
                 tier.architect = args.architect_model
             if args.dev_model:

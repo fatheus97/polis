@@ -248,12 +248,17 @@ class ClaudeCodeDev(Dev):
             parts.append(f"\nThe previous attempt was REJECTED. Address this feedback:\n"
                          f"{review_feedback}")
         # Optional Opus PLAN pass before the Sonnet EXECUTE pass (plan-then-execute tiering).
+        self.last_cost = 0.0   # actual spend accumulates; banked before a pass that might fail
         plan_text, plan_cost = "", 0.0
         if self.plan_model:
             plan_text, plan_cost = self._plan(prd, review_feedback, workspace)
+            self.last_cost = plan_cost  # bank the plan spend NOW so a failing execute can't hide it
             if plan_text:
                 parts.append("\nFollow this implementation plan from a senior engineer who read the "
                              f"codebase:\n{plan_text}")
+            else:
+                warnings.warn(f"plan pass ({self.plan_model}) returned empty text — executing "
+                              "without a plan", stacklevel=2)
         parts.append("\nWrite the implementation and matching test_*.py tests. Do not commit.")
         resp = self.backend.complete(
             "\n".join(parts), system=system, model=self.model,

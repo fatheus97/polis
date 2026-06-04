@@ -138,7 +138,7 @@ class DevTest(unittest.TestCase):
         plan, execute = fake.calls
         self.assertEqual(plan["model"], "opus")                       # Opus plans
         self.assertIn("--disallowedTools", plan["extra_args"])        # plan pass is read-only
-        self.assertNotEqual(plan["permission_mode"], "acceptEdits")   # cannot edit while planning
+        self.assertEqual(plan["permission_mode"], "default")          # not acceptEdits — can't edit
         self.assertEqual(plan["cwd"], ws.path)                        # reads the repo
         self.assertEqual(execute["model"], "sonnet")                  # Sonnet executes
         self.assertEqual(execute["permission_mode"], "acceptEdits")
@@ -302,6 +302,33 @@ class RealAgentsCostAccountingTest(unittest.TestCase):
         self.assertTrue(res.merged)
         # architect .10 + dev (plan .30 + execute .50) + reviewer .20 = 1.10
         self.assertAlmostEqual(treasury.spent_on(res.run_id), 1.10, places=9)
+
+    def test_plan_cost_debited_even_when_execute_fails(self):
+        # If the plan pass spends real money and the execute pass then errors, the plan cost must
+        # still be charged (not silently lost) when the run escalates.
+        from polis.registry import ModelTier
+        backend = FakeLLM([
+            LLMResponse(text=PRD_JSON, cost_usd=0.10),       # architect
+            LLMResponse(text="1. edit x", cost_usd=0.30),    # dev PLAN ok (real Opus spend)
+            LLMError("claude API error: Overloaded"),        # dev EXECUTE fails
+        ])
+        treasury = Treasury(":memory:")
+        treasury.appropriate(100)
+        ws = FakeWorkspace()
+        ws.fake_changes = [FileChange("f.py", "x = 1\n")]
+        tmp = Path(tempfile.mkdtemp(prefix="polis-planfail-"))
+        orch = Orchestrator(
+            registry=Registry.real(backend, ModelTier(dev_plan_model="opus")),
+            treasury=treasury, record=Record(tmp / "record.jsonl"),
+            constitution=Constitution.load(), workspace=ws,
+            sandbox=ScriptedSandbox([passing()]), run_store=RunStore(":memory:"),
+            config=OrchestratorConfig(),
+        )
+        res = orch.process(FeedbackItem(text="x"))
+        self.assertEqual(res.outcome, Stage.ESCALATE)
+        self.assertEqual(res.last_stage, Stage.IMPLEMENT)
+        # architect .10 + dev plan .30 (execute failed) = .40 — the plan spend is NOT lost
+        self.assertAlmostEqual(treasury.spent_on(res.run_id), 0.40, places=9)
 
     def test_infra_error_escalates_rather_than_rejecting(self):
         # A transient API failure must ESCALATE (human attention), not be mistaken for

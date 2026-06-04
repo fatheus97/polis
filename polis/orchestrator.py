@@ -265,6 +265,10 @@ class Orchestrator:
                         workspace=ws,
                     )
                 except LLMError as e:
+                    # Charge any spend that already happened (e.g. a completed plan pass) before
+                    # bailing — a failing execute must not hide the plan's real cost.
+                    if dev.last_cost:
+                        self.treasury.debit("executive:dev", dev.last_cost, "implement", run_id)
                     ws.discard()
                     return result(Stage.ESCALATE, Stage.IMPLEMENT, f"llm_error: {e}")
                 ws.apply(diff)
