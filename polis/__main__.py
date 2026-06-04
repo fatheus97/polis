@@ -138,7 +138,6 @@ def main(argv=None) -> int:
                                  resolve_model_tier_overrides, resolve_real_runs,
                                  resolve_testing_mode, resolve_ticketizer,
                                  resolve_workspace, write_config)
-        from .registry import ModelTier
         updates = {}
         if args.repo is not None:
             # "" clears it (reset to managed default); avoid Path("").resolve() == CWD.
@@ -182,8 +181,10 @@ def main(argv=None) -> int:
             deploy_command=args.deploy,
         )
         if args.real:
+            from .projectcfg import resolve_model_tier_overrides
+            # precedence: per-role flag > --model > config (architect_model/…) > default
             tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)
-                    if args.model else ModelTier())
+                    if args.model else ModelTier(**resolve_model_tier_overrides(args.base)))
             if args.architect_model:
                 tier.architect = args.architect_model
             if args.dev_model:
