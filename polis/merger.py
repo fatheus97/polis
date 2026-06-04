@@ -70,8 +70,9 @@ class PullRequestMerger(Merger):
                 raise MergeConflict(f"push failed: {(r.stderr or r.stdout or '')[:200]}")
 
             title = (message.splitlines()[0][:200] if message else branch)
+            body = f"{message}\n\nOpened by Polis (automated)."
             r = self._run(cwd, self.gh, "pr", "create", "--base", main, "--head", branch,
-                          "--title", title, "--body", f"{message}\n\nOpened by Polis (automated).",
+                          "--title", title, "--body", body,
                           timeout=120)
             if r.returncode != 0:
                 raise MergeConflict(f"gh pr create failed: {(r.stderr or r.stdout or '')[:200]}")
@@ -79,7 +80,11 @@ class PullRequestMerger(Merger):
 
             self._await_checks(cwd, pr)
 
+            # Pin the squash commit subject to the PRD-derived PR title. Without --subject,
+            # gh defaults to the head branch's commit message — which for Polis is the dev's
+            # WIP summary (e.g. "All the pieces are in place. Here's a summary of...").
             r = self._run(cwd, self.gh, "pr", "merge", pr, "--squash", "--delete-branch",
+                          "--subject", title, "--body", body,
                           timeout=180)
             if r.returncode != 0:
                 raise MergeConflict(f"gh pr merge failed: {(r.stderr or r.stdout or '')[:200]}")
