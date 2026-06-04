@@ -89,6 +89,12 @@ def resolve_merge_via_pr(base) -> bool:
     return bool(read_config(base).get("merge_via_pr", False))
 
 
+def resolve_restart_on_merge(base) -> bool:
+    """When on, the dashboard auto-restarts after it merges a change to its OWN checkout (the
+    self-dev loop), so the new code/UI is applied without a manual restart. Default off."""
+    return bool(read_config(base).get("restart_on_merge", False))
+
+
 def resolve_dev_timeout(base) -> int:
     """Seconds the agentic dev (Claude Code) may run per attempt before timing out (default 900).
     The architect/reviewer keep the backend's shorter default."""

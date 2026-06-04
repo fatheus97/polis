@@ -7,10 +7,44 @@ import time
 import unittest
 from pathlib import Path
 
+import types
+
 from polis.dashboard import data, reader
-from polis.dashboard.runner import RunManager
+from polis.dashboard.runner import RunManager, _is_self_dev
 
 HAVE_GIT = shutil.which("git") is not None
+
+
+class RestartHookTest(unittest.TestCase):
+    """The dashboard auto-restart fires only when a run MERGES a change to our OWN checkout
+    (self-dev) AND a supervisor hook is armed — never otherwise."""
+
+    def setUp(self):
+        import polis
+        self.checkout = Path(polis.__file__).resolve().parent.parent  # .../<checkout>
+        self.base = Path(tempfile.mkdtemp(prefix="polis-restart-"))
+        self.rm = RunManager(self.base)
+
+    def tearDown(self):
+        self.rm.shutdown()
+
+    def test_is_self_dev_true_only_for_our_checkout(self):
+        from polis.projectcfg import write_config
+        write_config(self.base, {"workspace": str(self.checkout)})
+        self.assertTrue(_is_self_dev(self.base))
+        write_config(self.base, {"workspace": tempfile.mkdtemp(prefix="polis-other-")})
+        self.assertFalse(_is_self_dev(self.base))
+
+    def test_should_restart_requires_hook_merged_and_self_dev(self):
+        from polis.projectcfg import write_config
+        write_config(self.base, {"workspace": str(self.checkout)})  # self-dev
+        merged, not_merged = types.SimpleNamespace(merged=True), types.SimpleNamespace(merged=False)
+        self.assertFalse(self.rm._should_restart(merged))           # no hook armed yet
+        self.rm.set_restart_hook(lambda: None)
+        self.assertTrue(self.rm._should_restart(merged))            # hook + merged + self-dev
+        self.assertFalse(self.rm._should_restart(not_merged))       # didn't merge
+        write_config(self.base, {"workspace": tempfile.mkdtemp(prefix="polis-other-")})
+        self.assertFalse(self.rm._should_restart(merged))           # merged but not our checkout
 
 
 class WriteActionsTest(unittest.TestCase):

@@ -183,6 +183,78 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertNotIn('FEEDBACK_WIDGET_PLACEHOLDER', r.text)
 
+    def test_supervise_relaunches_on_restart_code_then_stops(self):
+        # The supervisor relaunches the child while it exits with _RESTART_EXIT_CODE (a
+        # self-dev merge), and stops + propagates any other exit code.
+        # _supervise itself uses no FastAPI, but it lives in server.py (can't import without
+        # the extra), so this test is gated on HAVE_FASTAPI like the rest of the class.
+        import types as _t
+
+        import polis.dashboard.server as srv
+        calls = {"n": 0}
+
+        def fake_run(argv, env=None):
+            calls["n"] += 1
+            self.assertEqual(env.get("POLIS_DASH_SUPERVISED"), "1")   # child is marked supervised
+            self.assertIn("--no-browser", argv)                       # child never opens a browser
+            code = srv._RESTART_EXIT_CODE if calls["n"] < 3 else 0
+            return _t.SimpleNamespace(returncode=code)
+
+        orig = srv.subprocess.run
+        srv.subprocess.run = fake_run
+        try:
+            code = srv._supervise(self.base, "127.0.0.1", 8799, open_browser=False)
+        finally:
+            srv.subprocess.run = orig
+        self.assertEqual(code, 0)        # the final (non-restart) code is propagated
+        self.assertEqual(calls["n"], 3)  # relaunched twice (97, 97), then exited on 0
+
+    def test_text_routes_survive_non_utf8_bytes(self):
+        # index/widget decode bytes -> str; a stray non-UTF-8 byte must degrade (errors=replace),
+        # never 500.
+        import polis.dashboard.server as srv
+        tmp = Path(tempfile.mkdtemp(prefix="polis-enc-"))
+        (tmp / "index.html").write_bytes(b"<html>\xff\xfe caf\xe9 <!-- FEEDBACK_WIDGET_PLACEHOLDER --></html>")
+        (tmp / "feedback-widget.js").write_bytes(b"// caf\xe9\nconsole.log(1);")
+        orig = srv._static_dir
+        srv._static_dir = lambda: tmp
+        try:
+            client = TestClient(srv.create_app(Path(tempfile.mkdtemp(prefix="polis-encbase-"))))
+        finally:
+            srv._static_dir = orig
+        self.assertEqual(client.get("/").status_code, 200)
+        self.assertEqual(client.get("/static/feedback-widget.js").status_code, 200)
+
+    def test_static_js_served_as_javascript(self):
+        # Windows' registry can map .js -> text/plain (browsers won't execute it); we force
+        # application/javascript regardless.
+        r = self.client.get("/static/app.js")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.headers["content-type"].startswith("application/javascript"))
+
+    def test_static_served_from_startup_snapshot_immune_to_disk_edits(self):
+        # THE FIX: a self-dev run rewrites app.js/index.html in the working tree mid-run; the
+        # running dashboard must keep serving the version captured at startup, not the
+        # half-written file on disk (which froze the UI).
+        import polis.dashboard.server as srv
+        tmp = Path(tempfile.mkdtemp(prefix="polis-snap-"))
+        (tmp / "app.js").write_text("console.log('v1');", encoding="utf-8")
+        (tmp / "index.html").write_text(
+            "<html>v1 <!-- FEEDBACK_WIDGET_PLACEHOLDER --></html>", encoding="utf-8")
+        orig = srv._static_dir
+        srv._static_dir = lambda: tmp
+        try:
+            client = TestClient(srv.create_app(Path(tempfile.mkdtemp(prefix="polis-snapbase-"))))
+        finally:
+            srv._static_dir = orig
+        # Mutate (and corrupt) the files on disk AFTER startup:
+        (tmp / "app.js").write_text("console.log('v2 BROKEN", encoding="utf-8")
+        (tmp / "index.html").write_text("<html>v2</html>", encoding="utf-8")
+        self.assertIn("v1", client.get("/static/app.js").text)   # snapshot, not the disk edit
+        self.assertNotIn("v2", client.get("/static/app.js").text)
+        self.assertIn("v1", client.get("/").text)                # index too
+        self.assertNotIn("v2", client.get("/").text)
+
 
 @unittest.skipUnless(HAVE_FASTAPI and HAVE_GIT, "needs the dashboard extra + git")
 class DashboardRunFlowTest(unittest.TestCase):

@@ -9,6 +9,9 @@ venv/
 # Polis runtime state (local government data)
 .polis/
 .polis-*/
+# legacy per-instance base folders (pre-`.polis-*` naming)
+.dog/
+.myapp/
 *.sqlite
 *.sqlite3
 *.db

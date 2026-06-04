@@ -58,7 +58,7 @@ dashboard you use *is* the repo Polis edits:
 # one-time
 git clone <your-polis-repo-url> ../polis-dev      # a repo you can push to (your fork)
 cd ../polis-dev                                    # run everything from the clone
-py -m polis --base .polis-selfdev config --repo . --testing-mode on --merge-via-pr on
+py -m polis --base .polis-selfdev config --repo . --testing-mode on --merge-via-pr on --restart-on-merge on
 py -m polis --base .polis-selfdev budget --appropriate 20
 
 # every session (from ../polis-dev):
@@ -74,8 +74,10 @@ screenshot → **Submit**. It becomes a ticket in the **Tester reports** panel; 
 
 **Why run *from* the clone?** The dashboard always serves files from whichever checkout you run
 `py -m polis` in — **not** from `--repo` (which only sets where Polis *develops*). Running from the
-clone makes them the same, so after you merge Polis's PR (the merger syncs the clone): **CSS/HTML/JS
-fixes appear on a browser refresh; Python (`server.py`) changes need a dashboard restart.**
+clone makes them the same. To keep the UI stable while a run rewrites these very files, the dashboard
+serves the assets it **snapshotted at startup**; the merged version is applied on the next restart —
+which **`--restart-on-merge on`** does for you automatically (a thin supervisor relaunches the
+dashboard the moment a self-dev change merges, so the new code *and* UI just appear).
 
 **What the one-time flags mean** (they persist, so later sessions are just `dashboard`):
 
@@ -84,6 +86,7 @@ fixes appear on a browser refresh; Python (`server.py`) changes need a dashboard
 | `config --repo <path>` | the repo Polis develops (use a dedicated clone for self-dev) |
 | `config --testing-mode on` | injects the 🐞 feedback widget (off → no widget) |
 | `config --merge-via-pr on` | lands changes via a CI-gated GitHub PR, never local `main` |
+| `config --restart-on-merge on` | auto-restarts the dashboard after a self-dev merge so changes show |
 | `budget --appropriate 20` | funds the treasury; real runs draw from it (leave `auto_run` off) |
 
 Everything below is **background** — how it works, the build phases, the full CLI. For day-to-day use,
