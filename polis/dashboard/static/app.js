@@ -315,10 +315,10 @@ $("repoForm").onsubmit = async (e) => {
   e.preventDefault();
   const ws = $("repoPath").value.trim();
   if (ws && !confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
-  const branch = $("repoBranchSelect").value || $("repoBranch").value.trim() || null;
+  const branch = $("repoBranchSelect").value || null;
   try {
     await api("POST", "/api/config", { workspace: ws, main_branch: branch });
-    $("repoPath").value = ""; $("repoBranch").value = "";
+    $("repoPath").value = "";
     $("repoBranchSelect").innerHTML = '<option value="">— branch —</option>';
     toast("Target repo set."); loadConfig();
   } catch (err) { toast(err.message); }
