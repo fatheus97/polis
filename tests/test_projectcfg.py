@@ -121,6 +121,14 @@ class ProjectCfgTest(unittest.TestCase):
         projectcfg.write_config(self.base, {"grounded_agents": True})
         self.assertTrue(projectcfg.resolve_grounded_agents(self.base))
 
+    def test_dev_plan_model_flows_through_tier(self):
+        from polis.registry import ModelTier
+        self.assertIsNone(
+            ModelTier(**projectcfg.resolve_model_tier_overrides(self.base)).dev_plan_model)
+        projectcfg.write_config(self.base, {"dev_plan_model": "opus"})
+        self.assertEqual(
+            ModelTier(**projectcfg.resolve_model_tier_overrides(self.base)).dev_plan_model, "opus")
+
     def test_merge_via_pr_default_off_and_injection(self):
         from polis.app import build_government
         from polis.merger import LocalMerger, PullRequestMerger

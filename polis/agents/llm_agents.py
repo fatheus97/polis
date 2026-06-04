@@ -71,6 +71,14 @@ WIDGET_INSTRUCTION = (
     "to load only under TESTING_MODE, and add a test asserting the widget is referenced."
 )
 
+PLAN_SYSTEM = (
+    "You are a senior engineer producing a concrete, file-by-file IMPLEMENTATION PLAN for the PRD. "
+    "Read the repository (read-only) to ground the plan in the ACTUAL code: list which files to "
+    "create or modify, the specific functions/changes in each, the test_*.py files to add, and any "
+    "existing helpers to reuse. Be concrete and minimal. Do NOT write or edit any files — output the "
+    "plan as plain text only."
+)
+
 REVIEWER_SYSTEM = (
     "You are the Judiciary/Reviewer branch. Judge whether a code change correctly and "
     "safely implements its PRD. Be skeptical and DEFAULT TO REJECTION WHEN UNCERTAIN. "
@@ -196,9 +204,14 @@ class LLMArchitect(Architect):
 
 class ClaudeCodeDev(Dev):
     def __init__(self, backend: LLMBackend, model: str = "haiku",
-                 permission_mode: str = "acceptEdits", cost_estimate: float = 1.50,
+                 permission_mode: str = "acceptEdits", cost_estimate: float | None = None,
                  specialty: str | None = None, testing_mode: bool = False,
-                 timeout: int = 900):
+                 timeout: int = 900, plan_model: str | None = None):
+        # With plan_model set, the dev does a read-only PLAN pass (e.g. Opus) then the EXECUTE pass
+        # (e.g. Sonnet) — two model calls, so the estimate is bumped. The estimate only sizes the
+        # affordability gate; the actual combined spend is what gets debited.
+        if cost_estimate is None:
+            cost_estimate = 3.50 if plan_model else 1.50
         super().__init__("dev", Branch.EXECUTIVE, cost_estimate)
         self.backend = backend
         self.model = model
@@ -208,6 +221,19 @@ class ClaudeCodeDev(Dev):
         # The dev is agentic Claude Code (edits many files + runs tests), so it needs far longer
         # than the architect/reviewer's single completions; 300s was timing real features out.
         self.timeout = timeout
+        self.plan_model = plan_model
+
+    def _plan(self, prd, review_feedback, workspace):
+        """Read-only PLAN pass (e.g. Opus): explore the repo, emit a concrete file-by-file plan.
+        Returns (plan_text, cost). Stays read-only (READONLY_ARGS) — it plans the HOW, doesn't edit."""
+        parts = [f"Produce a concrete implementation plan for this PRD:\n\n{prd.to_markdown()}"]
+        if review_feedback:
+            parts.append(f"\nThe previous attempt was rejected for:\n{review_feedback}")
+        resp = self.backend.complete(
+            "\n".join(parts), system=PLAN_SYSTEM, model=self.plan_model,
+            cwd=str(workspace.path), extra_args=READONLY_ARGS, timeout=self.timeout,
+        )
+        return (resp.text or ""), resp.cost_usd
 
     def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
         if workspace is None:
@@ -221,15 +247,25 @@ class ClaudeCodeDev(Dev):
         if review_feedback:
             parts.append(f"\nThe previous attempt was REJECTED. Address this feedback:\n"
                          f"{review_feedback}")
+        # Optional Opus PLAN pass before the Sonnet EXECUTE pass (plan-then-execute tiering).
+        plan_text, plan_cost = "", 0.0
+        if self.plan_model:
+            plan_text, plan_cost = self._plan(prd, review_feedback, workspace)
+            if plan_text:
+                parts.append("\nFollow this implementation plan from a senior engineer who read the "
+                             f"codebase:\n{plan_text}")
         parts.append("\nWrite the implementation and matching test_*.py tests. Do not commit.")
         resp = self.backend.complete(
             "\n".join(parts), system=system, model=self.model,
             cwd=str(workspace.path), permission_mode=self.permission_mode,
             timeout=self.timeout,
         )
-        self.last_cost = resp.cost_usd
+        self.last_cost = plan_cost + resp.cost_usd  # one debit covers both passes
         changes = workspace.changed_files() if hasattr(workspace, "changed_files") else []
-        return Diff(changes=changes, summary=(resp.text or f"implement {prd.id}")[:300])
+        summary = (resp.text or f"implement {prd.id}")[:300]
+        if plan_text:  # surface the plan for the audit trail (folded into the IMPLEMENT event)
+            summary = f"Plan: {plan_text.splitlines()[0][:120]} | {summary}"[:300]
+        return Diff(changes=changes, summary=summary)
 
 
 class LLMReviewer(Reviewer):

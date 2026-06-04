@@ -114,14 +114,15 @@ def resolve_dev_timeout(base) -> int:
 
 
 def resolve_model_tier_overrides(base) -> dict:
-    """Per-role model overrides from config (architect_model/dev_model/review_model), as a dict
-    for `ModelTier(**overrides)`. Unset roles fall back to ModelTier's defaults."""
+    """Per-role model overrides from config (architect_model/dev_model/review_model, plus the
+    optional dev_plan_model for plan-then-execute), as a dict for `ModelTier(**overrides)`.
+    Unset keys fall back to ModelTier's defaults."""
     c = read_config(base)
     out = {}
-    for role, key in (("architect", "architect_model"), ("reviewer", "review_model"),
-                      ("dev", "dev_model")):
+    for field, key in (("architect", "architect_model"), ("reviewer", "review_model"),
+                       ("dev", "dev_model"), ("dev_plan_model", "dev_plan_model")):
         if c.get(key):
-            out[role] = c[key]
+            out[field] = c[key]
     return out
 
 
