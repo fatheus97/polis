@@ -87,7 +87,10 @@ CONSTITUTIONAL_SYSTEM = (
 )
 
 
-def _render_diff(diff: Diff, per_file: int = 1500, total: int = 8000) -> str:
+def _render_diff(diff: Diff, per_file: int = 20000, total: int = 80000) -> str:
+    # The reviewer must actually SEE the code to verify it — a 1500-char/file cap made it
+    # reject real multi-file features as "truncated, cannot verify". Sonnet's context easily
+    # holds tens of KB; only genuinely huge diffs are trimmed now.
     out, used = [], 0
     for ch in diff.changes:
         body = ch.content[:per_file]

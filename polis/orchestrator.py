@@ -274,7 +274,8 @@ class Orchestrator:
                 # VERIFY (procedure runs the sandbox; no LLM cost)
                 test_result = self.sandbox.run_tests(ws)
                 rec(Stage.VERIFY, "procedure", "test_result", attempt=attempt,
-                    passed=test_result.passed, summary=test_result.summary)
+                    passed=test_result.passed, summary=test_result.summary,
+                    details=(test_result.details or "")[-2000:])
 
                 # REVIEW (judicial) — invoked ONLY here, by the procedure
                 if not self._afford(reviewer.cost, run_id):

@@ -140,5 +140,19 @@ class ReviewIndependenceTest(unittest.TestCase):
         self.assertEqual(params, ["self", "prd", "diff", "test_result", "constitution"])
 
 
+class RecordDetailsTest(unittest.TestCase):
+    def test_test_result_details_are_recorded(self):
+        from polis.models import TestResult
+        bad = TestResult(ran=True, passed=False, summary="tests failed",
+                         details="AssertionError: boom")
+        good = TestResult(ran=True, passed=True, summary="ok", details="Ran 1 test\nOK")
+        h = Harness(sandbox=ScriptedSandbox([bad, good]))   # fail once, then pass + merge
+        h.orch.process(fb())
+        details = [e["payload"].get("details") for e in h.events()
+                   if e["kind"] == "test_result"]
+        # the failing attempt's output is captured (so a human sees WHY in the dashboard)
+        self.assertTrue(any("AssertionError: boom" in (d or "") for d in details))
+
+
 if __name__ == "__main__":
     unittest.main()

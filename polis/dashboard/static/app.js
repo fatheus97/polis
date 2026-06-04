@@ -69,7 +69,8 @@ function payloadSummary(kind, p) {
     case "amend": return `amended → rev ${esc(p.revision)}`;
     case "hire": return `dev: ${esc(p.discipline || "generalist")}`;
     case "diff": return `attempt ${esc(p.attempt)} · ${(p.files || []).map(esc).join(", ")}`;
-    case "test_result": return p.passed ? "tests passed ✓" : "tests failed ✗";
+    case "test_result": return (p.passed ? "tests passed ✓" : "tests failed ✗")
+      + (!p.passed && p.details ? " · " + esc(p.details.trim().slice(-200)) : "");
     case "verdict": return `${p.approved ? "approved ✓" : "rejected ✗"}${(p.reasons || []).length ? " · " + esc(p.reasons.join("; ")) : ""}`;
     case "revise": return `→ attempt ${esc(p.attempt)}: ${esc(p.feedback || "")}`;
     case "merge": return `merged ${esc(short(p.commit, 10))}`;
