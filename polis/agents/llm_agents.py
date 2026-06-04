@@ -215,7 +215,7 @@ class LLMReviewer(Reviewer):
             f"\nTest result: {'PASS' if test_result.passed else 'FAIL'} — {test_result.summary}",
         ]
         if test_result.details:
-            parts.append(f"\nTest output (tail):\n{test_result.details[-1000:]}")
+            parts.append(f"\nTest output (tail):\n{test_result.details[-2000:]}")
         parts.append(f"\nChanged files:\n{_render_diff(diff)}")
         if violations:
             scan = ", ".join(f"{v.rule_id}({v.severity}) in {v.path}" for v in violations)
