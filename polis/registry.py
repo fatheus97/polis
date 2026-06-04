@@ -27,11 +27,13 @@ class RoleTemplate:
 
 @dataclass
 class ModelTier:
-    """Cost-tiered model assignment: strong models judge & spec, a cheap one grinds."""
+    """Per-role models. The dev writes real code, so the default is `sonnet` (Haiku proved too
+    weak — it wrote hanging tests and non-portable `git checkout main`). Override per role via
+    `config --architect-model/--dev-model/--review-model` (e.g. `--architect-model opus`)."""
 
     architect: str = "sonnet"
     reviewer: str = "sonnet"
-    dev: str = "haiku"
+    dev: str = "sonnet"
 
 
 # Curated specialist expertise. An unknown discipline is still hireable — its
