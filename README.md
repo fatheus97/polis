@@ -20,6 +20,64 @@ reviewer. Three cross-cutting mechanisms are the brakes on a fully autonomous sy
 
 See [`docs/PRD.md`](docs/PRD.md) for the full design.
 
+## Quickstart — open the dashboard and give feedback
+
+You drive Polis from the **dashboard**: a local web panel where you give feedback, watch it work, and
+approve runs. After a **one-time setup per project**, starting work is a *single* command —
+`py -m polis --base <name> dashboard`. (`<name>` just labels one project's saved state — its budget,
+config, and history; reuse the same name each session.)
+
+Install the dashboard extra once:
+
+```powershell
+py -m pip install -e ".[dashboard]"
+```
+
+### A) Work on your own app (the usual case)
+
+```powershell
+# one-time, for this project
+py -m polis --base .myapp config --repo C:\path\to\your-app   # the repo Polis develops
+py -m polis --base .myapp budget --appropriate 20            # fund it (real runs cost money)
+
+# every session — just this:
+py -m polis --base .myapp dashboard                          # opens http://127.0.0.1:8765
+```
+
+In the browser: type what you want built or fixed in the **Submit feedback** box → **Run next** →
+watch it move through the stage timeline. That's the whole loop.
+
+### B) Polis on its own dashboard (self-development)
+
+Here you report issues with the floating **🐞 widget** and Polis improves its *own* dashboard. Point it
+at a **dedicated clone** with PR-based merge, so it never touches the checkout you're editing:
+
+```powershell
+# one-time
+git clone <your-polis-repo-url> ../polis-dev                 # a repo you can push to (your fork)
+py -m polis --base .dog config --repo ../polis-dev --testing-mode on --merge-via-pr on
+py -m polis --base .dog budget --appropriate 20
+
+# every session — just this:
+py -m polis --base .dog dashboard
+```
+
+In the browser: click the **🐞** button (bottom-right) → describe the issue, optionally paste a
+screenshot → **Submit**. It becomes a ticket in the **Tester reports** panel; open it and click
+**▶ Run this ticket**. Polis opens a PR you review and merge.
+
+**What the one-time flags mean** (they persist, so later sessions are just `dashboard`):
+
+| flag | what it does |
+| --- | --- |
+| `config --repo <path>` | the repo Polis develops (use a dedicated clone for self-dev) |
+| `config --testing-mode on` | injects the 🐞 feedback widget (off → no widget) |
+| `config --merge-via-pr on` | lands changes via a CI-gated GitHub PR, never local `main` |
+| `budget --appropriate 20` | funds the treasury; real runs draw from it (leave `auto_run` off) |
+
+Everything below is **background** — how it works, the build phases, the full CLI. For day-to-day use,
+the two recipes above are all you need.
+
 ## Status: Phase 4 — autonomous tester feedback loop
 
 Real, model-backed officials run a procedure with legislative deliberation, review of the law,
@@ -79,7 +137,10 @@ INTAKE → SPEC → [CONSTITUTIONAL] → IMPLEMENT → VERIFY → REVIEW → (ME
 
 Stub agents (Phase 0) remain the default and power the hermetic test suite.
 
-## Quick start (Phase 0, stdlib-only)
+## Driving it from the CLI (no dashboard)
+
+The dashboard (Quickstart) is the easy path; you can also run the same procedure straight from the
+CLI — useful for scripting, contributing, or the free stub-agent demo:
 
 ```powershell
 # run the test suite (no dependencies required)
@@ -103,76 +164,26 @@ py -m polis --base .polis-real run --real --architects 3 --constitution-court
 py -m polis --base .polis-real run --real --parallel 4 --decorrelate
 ```
 
-### Watch it live — the dashboard (optional extra)
+### The dashboard & feedback loop (background)
 
-A local web control panel to *watch* runs walk the stage timeline (color-coded by branch),
-see treasury burn, and take light actions (submit feedback, fund the treasury, trigger a run).
-Built on FastAPI as an **optional extra** so the core stays stdlib-only:
+The dashboard is a FastAPI **optional extra** (the core stays stdlib-only) where you watch runs walk
+the stage timeline, see the treasury burn, submit feedback, and trigger/approve runs — see the
+[Quickstart](#quickstart--open-the-dashboard-and-give-feedback) above for the two ways to use it.
 
-```powershell
-py -m pip install -e ".[dashboard]"
-py -m polis --base .polis-real dashboard      # opens http://127.0.0.1:8765
-```
+Beyond the **Submit feedback** box, `testing_mode` injects the floating **🐞 widget** into the app
+Polis develops (and the dashboard itself): a tester describes an issue, pastes a screenshot, and
+submits; the widget auto-captures console/storage/cookies/url, an async **Clerk** distills it into a
+structured ticket, and it becomes architect feedback.
 
-By default Polis develops a managed repo at `<base>/workspace`. To point it at **your own
-app's repo** (the agents will branch, commit, and merge into it), set the target — via the CLI
-or the dashboard's control panel:
-
-```powershell
-py -m polis --base .polis-real config --repo C:\path\to\your-app   # --main-branch master if needed
-```
-
-### Tester feedback loop (testing mode)
-
-Turn on `testing_mode` and Polis injects a floating **feedback widget** into the app it develops
-(and the dashboard itself). A tester describes an issue, pastes a screenshot, and submits; the
-widget auto-captures console/storage/cookies/url, an async **Clerk** distills it into a structured
-ticket, and it becomes a feedback item the architect works on. Pointed at its own repo, Polis
-develops its own dashboard — and a **constitution rule blocks it from touching its core** (it may
-only edit `polis/dashboard/`, tests, docs).
-
-```powershell
-py -m polis --base .polis-real config --testing-mode on   # show the 🐞 widget on the configured app
-py -m polis --base .polis-real dashboard                  # file reports; review the tickets
-```
-
-> Want Polis to work on **its own** dashboard? Don't point it at the checkout you're editing —
-> see [Self-development (safely)](#self-development-safely) just below.
-
-### Self-development (safely)
-
-Polis is built to develop **other** apps: you give it a folder and its own code isn't in there, so
-it just branches, commits, and (with PR-mode) opens PRs in that folder. Nothing special is needed,
-and `protect-core` is inert because the target has no Polis core to guard.
-
-Self-development — Polis improving *its own* dashboard — is the one case that needs care, because
-its code and the copy you edit could be the same checkout. The safe setup is a **dedicated clone**
-plus **PR-based merge**, so Polis never touches your working tree or `main`:
-
-```powershell
-git clone <your-polis-repo-url> ../polis-dev    # a repo you can push to (your fork)
-py -m polis --base .dog config --repo ../polis-dev --testing-mode on --merge-via-pr on
-py -m polis --base .dog dashboard
-```
-
-What each line does:
-
-1. **`git clone <your-polis-repo-url> ../polis-dev`** — a throwaway, *dedicated* checkout of the
-   repo Polis will edit, separate from the copy you work in. All of Polis's branch/checkout churn
-   happens here, never in your tree. Use a repo you have push access to (your own fork), so its
-   `origin` is a GitHub repo where the PRs it opens can run CI and be merged after your review.
-2. **`config --repo ../polis-dev --testing-mode on --merge-via-pr on`** — for this `.dog` instance:
-   point the workspace at the clone (`--repo`), inject the feedback widget (`--testing-mode on`), and
-   turn on **PR-based merge** (`--merge-via-pr on`) so Polis lands changes by pushing a branch and
-   opening a CI-gated GitHub PR (push → wait for the required checks → squash-merge) instead of
-   merging into local `main`.
-3. **`dashboard`** — launch the control panel for this instance; file reports with the 🐞 widget and
-   **review/merge the PRs Polis opens**. (Its branches are prefixed `polis/`, and the AI-review
-   workflow skips them — the orchestrator's own Reviewer already vetted the diff and required CI
-   still gates the merge.)
-
-First fund the treasury (`py -m polis --base .dog budget --appropriate 20`) and leave `auto_run`
-off so you stay in the loop. Needs `gh` authenticated + CI on the repo — a clone of this repo has both.
+**Self-development safety.** Polis is built to develop *other* apps — you give it a folder and its own
+code isn't there, so nothing special is needed (`protect-core` is inert because the target has no
+Polis core to guard). Polis improving *its own* repo is the one case that needs care: always point it
+at a **dedicated clone** (Quickstart B), never the checkout you're editing. Two guards then keep it
+safe — a **constitution rule** fences it to `polis/dashboard/`, tests, and docs (never its
+orchestration core), and **`--merge-via-pr on`** lands changes through a CI-gated PR instead of local
+`main`. Its PRs land on `polis/`-prefixed branches, which the AI-review workflow skips (the
+orchestrator's own Reviewer already vetted the diff and required CI still gates the merge). Needs `gh`
+authenticated + CI on the target repo — a clone of this repo has both.
 
 ## Roadmap
 
