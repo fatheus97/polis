@@ -47,6 +47,29 @@ class ProjectCfgTest(unittest.TestCase):
         (self.base / "config.json").write_text("{not json", encoding="utf-8")
         self.assertEqual(projectcfg.read_config(self.base), {})
 
+    def test_model_tier_overrides_and_default(self):
+        from polis.registry import ModelTier
+        self.assertEqual(ModelTier().dev, "sonnet")  # the dev is bumped off Haiku
+        self.assertEqual(projectcfg.resolve_model_tier_overrides(self.base), {})
+        projectcfg.write_config(self.base, {"dev_model": "opus", "architect_model": "opus"})
+        ov = projectcfg.resolve_model_tier_overrides(self.base)
+        self.assertEqual(ov, {"architect": "opus", "dev": "opus"})
+        self.assertEqual(ModelTier(**ov).reviewer, "sonnet")  # an unset role keeps its default
+
+    def test_build_government_uses_config_models(self):
+        from polis.app import build_government
+        from polis.llm import FakeLLM
+        projectcfg.write_config(self.base, {"dev_model": "opus"})
+
+        class FakeWS:
+            path = "/not-the-polis-repo"
+        gov = build_government(self.base, agents="real", backend=FakeLLM([]), workspace=FakeWS())
+        try:
+            self.assertEqual(gov.registry.hire_dev().model, "opus")          # from config
+            self.assertEqual(gov.registry.spawn("architect").model, "sonnet")  # default
+        finally:
+            gov.close()
+
     def test_configured_non_git_dir_is_refused(self):
         from polis.app import build_government
         target = Path(tempfile.mkdtemp(prefix="polis-nongit-"))

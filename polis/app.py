@@ -17,7 +17,8 @@ from .feedback import FeedbackInbox
 from .llm import ClaudeCliBackend, LLMBackend
 from .models import RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
-from .projectcfg import (resolve_main_branch, resolve_merge_via_pr, resolve_testing_mode,
+from .projectcfg import (resolve_main_branch, resolve_merge_via_pr,
+                         resolve_model_tier_overrides, resolve_testing_mode,
                          resolve_workspace)
 from .record import Record
 from .registry import ModelTier, Registry
@@ -120,6 +121,8 @@ def build_government(
     constitution = Constitution.load(constitution_path)
     if agents == "real":
         backend = backend or ClaudeCliBackend()
+        # No explicit tier (e.g. dashboard runs) => take per-role models from config.
+        tier = tier or ModelTier(**resolve_model_tier_overrides(base))
         registry = Registry.real(backend, tier, testing_mode=resolve_testing_mode(base))
     else:
         registry = Registry.default()

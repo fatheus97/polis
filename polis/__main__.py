@@ -111,6 +111,12 @@ def main(argv=None) -> int:
                       help="absolute intake URL baked into the served widget (for external apps)")
     pcfg.add_argument("--intake-origins", default=None,
                       help="comma-separated CORS allow-origins for the intake endpoint")
+    pcfg.add_argument("--architect-model", default=None,
+                      help="model for the architect that writes the spec (e.g. opus, sonnet, haiku)")
+    pcfg.add_argument("--dev-model", default=None,
+                      help="model for the dev that writes the code (default sonnet)")
+    pcfg.add_argument("--review-model", default=None,
+                      help="model for the reviewer")
 
     args = p.parse_args(argv)
 
@@ -129,8 +135,9 @@ def main(argv=None) -> int:
     if args.cmd == "config":
         from .projectcfg import (is_managed_default, resolve_auto_run,
                                  resolve_main_branch, resolve_merge_via_pr,
-                                 resolve_real_runs, resolve_testing_mode,
-                                 resolve_ticketizer, resolve_workspace, write_config)
+                                 resolve_model_tier_overrides, resolve_real_runs,
+                                 resolve_testing_mode, resolve_ticketizer,
+                                 resolve_workspace, write_config)
         updates = {}
         if args.repo is not None:
             # "" clears it (reset to managed default); avoid Path("").resolve() == CWD.
@@ -146,6 +153,10 @@ def main(argv=None) -> int:
             updates["intake_url"] = args.intake_url.strip()
         if args.intake_origins is not None:
             updates["intake_origins"] = [o.strip() for o in args.intake_origins.split(",") if o.strip()]
+        for mkey, mval in (("architect_model", args.architect_model),
+                           ("dev_model", args.dev_model), ("review_model", args.review_model)):
+            if mval is not None:
+                updates[mkey] = mval.strip()
         if updates:
             write_config(args.base, updates)
         tag = "managed default" if is_managed_default(args.base) else "configured"
@@ -156,6 +167,8 @@ def main(argv=None) -> int:
               f"ticketizer : {resolve_ticketizer(args.base)}   "
               f"real_runs : {resolve_real_runs(args.base)}   "
               f"merge_via_pr : {resolve_merge_via_pr(args.base)}")
+        t = ModelTier(**resolve_model_tier_overrides(args.base))
+        print(f"models       : architect={t.architect}  dev={t.dev}  reviewer={t.reviewer}")
         return 0
 
     config = None
@@ -168,8 +181,10 @@ def main(argv=None) -> int:
             deploy_command=args.deploy,
         )
         if args.real:
+            from .projectcfg import resolve_model_tier_overrides
+            # precedence: per-role flag > --model > config (architect_model/…) > default
             tier = (ModelTier(architect=args.model, reviewer=args.model, dev=args.model)
-                    if args.model else ModelTier())
+                    if args.model else ModelTier(**resolve_model_tier_overrides(args.base)))
             if args.architect_model:
                 tier.architect = args.architect_model
             if args.dev_model:

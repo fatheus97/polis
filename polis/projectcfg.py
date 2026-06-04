@@ -89,6 +89,18 @@ def resolve_merge_via_pr(base) -> bool:
     return bool(read_config(base).get("merge_via_pr", False))
 
 
+def resolve_model_tier_overrides(base) -> dict:
+    """Per-role model overrides from config (architect_model/dev_model/review_model), as a dict
+    for `ModelTier(**overrides)`. Unset roles fall back to ModelTier's defaults."""
+    c = read_config(base)
+    out = {}
+    for role, key in (("architect", "architect_model"), ("reviewer", "review_model"),
+                      ("dev", "dev_model")):
+        if c.get(key):
+            out[role] = c[key]
+    return out
+
+
 def resolve_intake_url(base) -> str:
     """Absolute intake URL baked into the served widget for cross-origin apps
     (empty => the widget posts same-origin to /api/report-intake)."""
