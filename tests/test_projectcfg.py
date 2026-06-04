@@ -79,6 +79,28 @@ class ProjectCfgTest(unittest.TestCase):
         finally:
             gov2.close()
 
+    def test_merge_via_pr_default_off_and_injection(self):
+        from polis.app import build_government
+        from polis.merger import LocalMerger, PullRequestMerger
+
+        class FakeWS:
+            def __init__(self, p):
+                self.path = p
+
+        self.assertFalse(projectcfg.resolve_merge_via_pr(self.base))  # default off
+        gov = build_government(self.base, workspace=FakeWS("/some/app"))
+        try:
+            self.assertIsInstance(gov.orchestrator.merger, LocalMerger)  # default = local
+        finally:
+            gov.close()
+
+        projectcfg.write_config(self.base, {"merge_via_pr": True})
+        gov2 = build_government(self.base, workspace=FakeWS("/some/app"))
+        try:
+            self.assertIsInstance(gov2.orchestrator.merger, PullRequestMerger)
+        finally:
+            gov2.close()
+
 
 @unittest.skipUnless(HAVE_GIT, "git required")
 class ConfiguredRepoTest(unittest.TestCase):

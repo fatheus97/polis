@@ -31,6 +31,23 @@ class ParallelWorktreeTest(unittest.TestCase):
         self.assertEqual(len({r.merge_commit for r in results}), 3)   # 3 distinct merges
         self.assertEqual(gov.treasury.total_spent(), 150)             # 3 x (20+10+20)
 
+    def test_parallel_falls_back_to_local_merge_when_merge_via_pr(self):
+        # merge_via_pr can't work across worktrees; the batch must fall back to a local merge
+        # (and still succeed) rather than escalate every run.
+        from polis import projectcfg
+        from polis.merger import LocalMerger
+        base = Path(tempfile.mkdtemp(prefix="polis-parpr-"))
+        projectcfg.write_config(base, {"merge_via_pr": True})  # no 'origin' on a managed repo
+        gov = build_government(base)
+        gov.treasury.appropriate(100_000)
+        gov.inbox.submit("feature x", directives={"module": "px"})
+        results = gov.run_parallel(gov.inbox.pending(), max_workers=1)
+        try:
+            self.assertTrue(results[0].merged, results[0].reason)   # fell back -> merged
+            self.assertIsInstance(gov.orchestrator.merger, LocalMerger)
+        finally:
+            gov.close()
+
     def test_merge_conflict_escalates(self):
         repo = Path(tempfile.mkdtemp(prefix="polis-conf-")) / "repo"
         mgr = WorktreeManager(repo)
