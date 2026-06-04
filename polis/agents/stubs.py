@@ -30,7 +30,7 @@ class StubArchitect(Architect):
     def __init__(self, cost: float = 20.0):
         super().__init__("architect", Branch.LEGISLATIVE, cost)
 
-    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback=""):
+    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback="", cwd=None):
         if prior is not None:
             # Revision: keep the same law, bump the rev, fold in the court's feedback.
             prior.revision += 1

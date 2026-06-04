@@ -144,7 +144,7 @@ class Orchestrator:
                     return result(Stage.ESCALATE, Stage.SPEC,
                                   "budget_exhausted: cannot fund SPEC")
                 try:
-                    prd = architect.write_prd(feedback)
+                    prd = architect.write_prd(feedback, cwd=str(ws.path))
                 except LLMError as e:
                     return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
                 self.treasury.debit("legislative:architect", architect.last_cost,
@@ -167,7 +167,7 @@ class Orchestrator:
                             return result(Stage.ESCALATE, Stage.SPEC,
                                           "budget_exhausted: cannot fund proposals")
                         try:
-                            p = m.write_prd(feedback)
+                            p = m.write_prd(feedback, cwd=str(ws.path))
                         except LLMError as e:
                             return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
                         self.treasury.debit("legislative:architect", m.last_cost,
@@ -231,7 +231,8 @@ class Orchestrator:
                                           "budget_exhausted: cannot fund PRD amendment")
                         try:
                             prd = architect.write_prd(feedback, prior=prd,
-                                                      review_feedback=ruling.feedback)
+                                                      review_feedback=ruling.feedback,
+                                                      cwd=str(ws.path))
                         except LLMError as e:
                             return result(Stage.ESCALATE, Stage.CONSTITUTIONAL, f"llm_error: {e}")
                         self.treasury.debit("legislative:architect", architect.last_cost,

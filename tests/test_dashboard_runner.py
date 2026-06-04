@@ -70,6 +70,57 @@ class WriteActionsTest(unittest.TestCase):
             self.rm.appropriate(0)
 
 
+class ScreenshotDirectiveTest(unittest.TestCase):
+    """The tester's screenshot path rides on the feedback directives, so a grounded Architect can
+    Read the image without the core ever touching ReportStore."""
+
+    def setUp(self):
+        from polis.projectcfg import write_config
+        self.base = Path(tempfile.mkdtemp(prefix="polis-shotdir-"))
+        write_config(self.base, {"ticketizer": False})  # immediate feedback, no Clerk LLM call
+        self.rm = RunManager(self.base)
+
+    def tearDown(self):
+        self.rm.shutdown()
+
+    def _directives_for(self, feedback_id):
+        pend = reader.read_pending_feedback(self.base)
+        return next(p for p in pend if p["id"] == feedback_id)["directives"]
+
+    def test_intake_puts_absolute_screenshot_path_in_directives(self):
+        out = self.rm.intake_report(text="headings too close to edge",
+                                    screenshot_bytes=b"\x89PNG\r\n\x1a\nimg", screenshot_ext="png")
+        shot = self._directives_for(out["feedback_id"]).get("screenshot_path")
+        self.assertTrue(shot and Path(shot).is_absolute() and Path(shot).exists())
+
+    def test_intake_without_screenshot_has_none_path(self):
+        out = self.rm.intake_report(text="no shot here")
+        self.assertIsNone(self._directives_for(out["feedback_id"]).get("screenshot_path"))
+
+    def test_clerk_fallback_path_carries_screenshot_path(self):
+        # Route through the async Clerk and force its backend to fail → the fallback path must
+        # still file feedback AND carry the screenshot_path (the 3rd intake site).
+        from polis.projectcfg import write_config
+        write_config(self.base, {"ticketizer": True})
+
+        def _boom():
+            raise RuntimeError("clerk backend unavailable")
+        self.rm._clerk_backend_factory = _boom
+        out = self.rm.intake_report(text="x", screenshot_bytes=b"\x89PNG\r\nimg", screenshot_ext="png")
+        rid = out["report_id"]
+        fb, deadline = None, time.time() + 10
+        while time.time() < deadline:
+            fb = next((p for p in reader.read_pending_feedback(self.base)
+                       if p["directives"].get("report_id") == rid), None)
+            if fb:
+                break
+            time.sleep(0.1)
+        self.assertIsNotNone(fb, "clerk fallback should still file feedback")
+        self.assertEqual(fb["directives"]["source"], "feedback-widget:clerk-fallback")
+        shot = fb["directives"].get("screenshot_path")
+        self.assertTrue(shot and Path(shot).exists())
+
+
 @unittest.skipUnless(HAVE_GIT, "git required for a real stub run")
 class TriggerRunTest(unittest.TestCase):
     def setUp(self):

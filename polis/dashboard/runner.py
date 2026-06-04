@@ -52,6 +52,13 @@ def _summarize_state(state: dict) -> dict:
     }
 
 
+def _screenshot_path(store, rid) -> str | None:
+    """Absolute path to a report's screenshot (or None) — ridden on the feedback directives so a
+    grounded Architect can Read the image, without the core ever touching ReportStore/the base."""
+    p = store.screenshot_path(rid)
+    return str(p) if p else None
+
+
 class RunManager:
     def __init__(self, base):
         self.base = Path(base)
@@ -119,6 +126,7 @@ class RunManager:
         fb = self.submit_feedback(
             text or "(no description)", by=submitted_by,
             directives={"report_id": report["id"], "source": "feedback-widget",
+                        "screenshot_path": _screenshot_path(store, report["id"]),
                         "state_summary": _summarize_state(report.get("state") or {})})
         store.set_feedback_id(report["id"], fb["id"])
         return {"report_id": report["id"], "feedback_id": fb["id"], "ticket_status": "none"}
@@ -141,6 +149,7 @@ class RunManager:
                 ticket_to_text(ticket), by=submitted_by,
                 directives={"report_id": report_id, "source": "feedback-widget:clerk",
                             "severity": ticket.get("severity"),
+                            "screenshot_path": _screenshot_path(store, report_id),
                             "state_summary": _summarize_state(report.get("state") or {})})
             store.set_feedback_id(report_id, fb["id"])
             if resolve_auto_run(self.base):
@@ -161,6 +170,7 @@ class RunManager:
                         report.get("text") or "(no description)", by=submitted_by,
                         directives={"report_id": report_id,
                                     "source": "feedback-widget:clerk-fallback",
+                                    "screenshot_path": _screenshot_path(store, report_id),
                                     "state_summary": _summarize_state(report.get("state") or {})})
                     store.set_feedback_id(report_id, fb["id"])
             except Exception:

@@ -40,7 +40,10 @@ class Architect(Agent):
         repo_summary: str = "",
         prior: PRD | None = None,
         review_feedback: str = "",
+        cwd: str | None = None,
     ) -> PRD:  # pragma: no cover - interface
+        # `cwd` (when set) is the repository; a grounded architect Reads it + the tester
+        # screenshot to write a code-grounded PRD. Plain architects ignore it.
         raise NotImplementedError
 
     def vote(self, proposals: list[PRD]) -> int:

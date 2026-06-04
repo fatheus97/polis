@@ -122,7 +122,8 @@ class Registry:
         reg = cls()
         reg.register(RoleTemplate("architect", Branch.LEGISLATIVE,
                                   lambda: LLMArchitect(backend, tier.architect,
-                                                       testing_mode=testing_mode),
+                                                       testing_mode=testing_mode,
+                                                       grounded=grounded),
                                   "LLM architect: feedback -> PRD."))
         reg.register(RoleTemplate("dev", Branch.EXECUTIVE,
                                   lambda: ClaudeCodeDev(backend, tier.dev,
