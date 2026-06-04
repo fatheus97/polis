@@ -17,6 +17,6 @@ jobs:
 
       # Config at .gitleaks.toml allowlists the FAKE secrets used as test fixtures
       # for Polis's own secret-detection (the Constitution).
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
