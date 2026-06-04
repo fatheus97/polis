@@ -132,9 +132,47 @@ develops its own dashboard — and a **constitution rule blocks it from touching
 only edit `polis/dashboard/`, tests, docs).
 
 ```powershell
-py -m polis --base .polis-dog config --repo C:\multi_coder --testing-mode on
-py -m polis --base .polis-dog dashboard      # click the 🐞 button to file a report
+py -m polis --base .polis-real config --testing-mode on   # show the 🐞 widget on the configured app
+py -m polis --base .polis-real dashboard                  # file reports; review the tickets
 ```
+
+> Want Polis to work on **its own** dashboard? Don't point it at the checkout you're editing —
+> see [Self-development (safely)](#self-development-safely) just below.
+
+### Self-development (safely)
+
+Polis is built to develop **other** apps: you give it a folder and its own code isn't in there, so
+it just branches, commits, and (with PR-mode) opens PRs in that folder. Nothing special is needed,
+and `protect-core` is inert because the target has no Polis core to guard.
+
+Self-development — Polis improving *its own* dashboard — is the one case that needs care, because
+its code and the copy you edit could be the same checkout. The safe setup is a **dedicated clone**
+plus **PR-based merge**, so Polis never touches your working tree or `main`:
+
+```powershell
+git clone https://github.com/fatheus97/polis ../polis-dev
+py -m polis --base .dog config --repo ../polis-dev --testing-mode on --merge-via-pr on
+py -m polis --base .dog dashboard
+```
+
+What each line does:
+
+1. **`git clone … ../polis-dev`** — a throwaway, *dedicated* checkout of the repo Polis will edit,
+   separate from the copy you work in. All of Polis's branch/checkout churn happens here, never in
+   your tree. Its `origin` points at GitHub, so the PRs it opens land on the real repo — after CI
+   and your review.
+2. **`config --repo ../polis-dev --testing-mode on --merge-via-pr on`** — for this `.dog` instance:
+   point the workspace at the clone (`--repo`), inject the feedback widget (`--testing-mode on`), and
+   turn on **PR-based merge** (`--merge-via-pr on`) so Polis lands changes by pushing a branch and
+   opening a CI-gated GitHub PR (push → wait for the required checks → squash-merge) instead of
+   merging into local `main`.
+3. **`dashboard`** — launch the control panel for this instance; file reports with the 🐞 widget and
+   **review/merge the PRs Polis opens**. (Its branches are prefixed `polis/`, and the AI-review
+   workflow skips them — the orchestrator's own Reviewer already vetted the diff and required CI
+   still gates the merge.)
+
+First fund the treasury (`budget --appropriate 20`) and leave `auto_run` off so you stay in the
+loop. Needs `gh` authenticated + CI on the repo — a clone of this repo has both.
 
 ## Roadmap
 
