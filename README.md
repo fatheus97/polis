@@ -24,8 +24,9 @@ See [`docs/PRD.md`](docs/PRD.md) for the full design.
 
 You drive Polis from the **dashboard**: a local web panel where you give feedback, watch it work, and
 approve runs. After a **one-time setup per project**, starting work is a *single* command —
-`py -m polis --base <name> dashboard`. (`<name>` just labels one project's saved state — its budget,
-config, and history; reuse the same name each session.)
+`py -m polis --base <name> dashboard`. `--base <name>` is just a folder where that project's state
+lives (budget, config, history, workspace); pick any name — but **start it with `.polis-`** so git
+ignores it (`.gitignore` covers `.polis-*/`). Same name = same project; reuse it each session.
 
 Install the dashboard extra once:
 
@@ -37,11 +38,11 @@ py -m pip install -e ".[dashboard]"
 
 ```powershell
 # one-time, for this project
-py -m polis --base .myapp config --repo C:\path\to\your-app   # the repo Polis develops
-py -m polis --base .myapp budget --appropriate 20            # fund it (real runs cost money)
+py -m polis --base .polis-myapp config --repo C:\path\to\your-app   # the repo Polis develops
+py -m polis --base .polis-myapp budget --appropriate 20            # fund it (real runs cost money)
 
 # every session — just this:
-py -m polis --base .myapp dashboard                          # opens http://127.0.0.1:8765
+py -m polis --base .polis-myapp dashboard                          # opens http://127.0.0.1:8765
 ```
 
 In the browser: type what you want built or fixed in the **feedback box** (under *Control panel*),
@@ -55,11 +56,11 @@ at a **dedicated clone** with PR-based merge, so it never touches the checkout y
 ```powershell
 # one-time
 git clone <your-polis-repo-url> ../polis-dev                 # a repo you can push to (your fork)
-py -m polis --base .dog config --repo ../polis-dev --testing-mode on --merge-via-pr on
-py -m polis --base .dog budget --appropriate 20
+py -m polis --base .polis-selfdev config --repo ../polis-dev --testing-mode on --merge-via-pr on
+py -m polis --base .polis-selfdev budget --appropriate 20
 
 # every session — just this:
-py -m polis --base .dog dashboard
+py -m polis --base .polis-selfdev dashboard
 ```
 
 > **Requires** `gh auth login` + a repo with CI (a fork of this repo has both) — `--merge-via-pr on`
