@@ -69,14 +69,22 @@ class PullRequestMergerTest(unittest.TestCase):
         runner = ScriptRunner()
         m = self._merger(runner)
         sha = m.merge(types.SimpleNamespace(path="/tmp/repo"),
-                      "polis/run-1/attempt-0", "Polis: merge prd-x")
+                      "polis/run-1/attempt-0", "Easier repo selection\n\nbody text here")
         self.assertEqual(sha, "abc123def456")  # from the synced `git rev-parse HEAD`
         verbs = [tuple(c) for c in runner.calls]
         # the essential sequence happened, and we NEVER pushed main
         self.assertIn(("git", "push", "-u", "origin", "polis/run-1/attempt-0"), verbs)
         self.assertTrue(any(c[:3] == ("gh", "pr", "create") and "--base" in c and "main" in c
                             for c in verbs))
-        self.assertTrue(any(c[:3] == ("gh", "pr", "merge") and "--squash" in c for c in verbs))
+        # squash-merge pins the subject to the PR title (not the dev's WIP commit subject)
+        merge = next(c for c in verbs if c[:3] == ("gh", "pr", "merge"))
+        self.assertIn("--squash", merge)
+        self.assertIn("--subject", merge)
+        self.assertEqual(merge[merge.index("--subject") + 1], "Easier repo selection")
+        # the commit body must NOT repeat the subject line (--subject already carries it)
+        commit_body = merge[merge.index("--body") + 1]
+        self.assertNotIn("Easier repo selection", commit_body)
+        self.assertIn("body text here", commit_body)
         self.assertNotIn(("git", "push", "origin", "main"), verbs)
 
     def test_ci_failure_escalates(self):
