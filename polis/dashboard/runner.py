@@ -165,8 +165,9 @@ class RunManager:
         if not guidance:
             return {"error": "guidance is required"}
         original = (summ.get("feedback_text") or "").strip()
+        reason = summ.get("reason") or "unknown"
         text = (f"{original}\n\n--- Sovereign guidance after {run_id} escalated "
-                f"(reason: {summ.get('reason')}) ---\n{guidance}")
+                f"(reason: {reason}) ---\n{guidance}")
         fb = self.submit_feedback(text, by="sovereign", directives={"retry_of": run_id})
         job = self.trigger_run(real=resolve_real_runs(self.base), feedback_id=fb["id"], opts={})
         return {"feedback_id": fb["id"], **job}

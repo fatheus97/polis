@@ -124,8 +124,10 @@ function renderDetail(d) {
 
 async function retryRun(runId, guidance) {
   if (!guidance.trim()) return toast("Add some guidance first.");
+  const rb = $("retryBtn");
   try {
     const r = await api("POST", `/api/runs/${runId}/retry`, { guidance });
+    if (rb) rb.disabled = true;  // one re-run per click — don't queue (and pay for) a second
     toast(`Re-running with your guidance (${short(r.job_id, 6)}).`);
     refresh();
   } catch (e) { toast(e.message); }
