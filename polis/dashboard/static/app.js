@@ -114,7 +114,11 @@ async function selectRun(id) {
   state.selected = id;
   try { localStorage.setItem("polis.selected", id); } catch (e) { /* private mode */ }
   try { renderDetail(await api("GET", `/api/runs/${id}`)); }
-  catch (e) { $("detail").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+  catch (e) {
+    // Drop a stale stored id (e.g. a cleared DB / new instance) so it doesn't error every reload.
+    try { localStorage.removeItem("polis.selected"); } catch (_) { /* private mode */ }
+    $("detail").innerHTML = `<p class="muted">${esc(e.message)}</p>`;
+  }
 }
 
 function renderFeed(events) {
