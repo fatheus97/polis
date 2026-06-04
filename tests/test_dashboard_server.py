@@ -63,6 +63,25 @@ class DashboardServerTest(unittest.TestCase):
     def test_unknown_run_detail_404(self):
         self.assertEqual(self.client.get("/api/runs/nope").status_code, 404)
 
+    def test_retry_unknown_run_404(self):
+        r = self.client.post("/api/runs/nope/retry", json={"guidance": "do x"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_retry_400_non_escalated_and_empty_guidance(self):
+        from polis.models import Stage
+        from polis.record import Record
+        rec = Record(self.base / "record.jsonl")
+        rec.append(run_id="r-done", stage=Stage.INTAKE, actor="procedure", kind="intake",
+                   feedback_id="fb", text="x")  # no escalate -> not retryable
+        self.assertEqual(self.client.post("/api/runs/r-done/retry",
+                                          json={"guidance": "go"}).status_code, 400)
+        rec.append(run_id="r-esc", stage=Stage.INTAKE, actor="procedure", kind="intake",
+                   feedback_id="fb2", text="x")
+        rec.append(run_id="r-esc", stage=Stage.ESCALATE, actor="procedure", kind="escalate",
+                   reason="revisions_exhausted")
+        self.assertEqual(self.client.post("/api/runs/r-esc/retry",
+                                          json={"guidance": "   "}).status_code, 400)  # empty guidance
+
     def test_config_get_default(self):
         c = self.client.get("/api/config").json()
         self.assertTrue(c["managed_default"])

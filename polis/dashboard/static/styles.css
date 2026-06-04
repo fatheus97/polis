@@ -100,3 +100,10 @@ button { padding: .35rem .7rem; margin: 0; }
 
 /* heading padding — all heading elements must have at least 1rem left padding/margin */
 h1, h2, h3, h4, h5, h6 { padding-left: 1rem; }
+
+/* escalation: sovereign guidance + re-run */
+.retry { margin-top: .75rem; padding: .6rem; border: 1px solid var(--b-judicial);
+  border-radius: 8px; display: flex; flex-direction: column; gap: .4rem; background: #fbbf2410; }
+.retry .rlabel { font-size: .8rem; }
+.retry textarea { margin: 0; font-size: .82rem; }
+.retry button { align-self: flex-start; background: var(--b-judicial); border-color: var(--b-judicial); color: #2a2000; font-weight: 600; }

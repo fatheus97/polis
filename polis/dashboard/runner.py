@@ -150,6 +150,28 @@ class RunManager:
         from ..reports import ReportStore
         return ReportStore(self.base).get(report_id)
 
+    def retry_run(self, run_id: str, guidance: str) -> dict:
+        """Sovereign intervention on an ESCALATED run: file a fresh feedback item carrying the
+        original ask + the human's guidance, then kick off a new run on it."""
+        from . import data, reader
+        from ..projectcfg import resolve_real_runs
+        groups = data.group_by_run(reader.read_record_events(self.base / "record.jsonl"))
+        if run_id not in groups:
+            return {"error": "run not found"}
+        summ = data.run_summary(groups[run_id])
+        if summ.get("outcome") != "ESCALATE":
+            return {"error": "only escalated runs can be retried"}
+        guidance = (guidance or "").strip()
+        if not guidance:
+            return {"error": "guidance is required"}
+        original = (summ.get("feedback_text") or "").strip()
+        reason = summ.get("reason") or "unknown"
+        text = (f"{original}\n\n--- Sovereign guidance after {run_id} escalated "
+                f"(reason: {reason}) ---\n{guidance}")
+        fb = self.submit_feedback(text, by="sovereign", directives={"retry_of": run_id})
+        job = self.trigger_run(real=resolve_real_runs(self.base), feedback_id=fb["id"], opts={})
+        return {"feedback_id": fb["id"], **job}
+
     # --- triggering a run (non-blocking) -----------------------------------
     def trigger_run(self, *, real: bool = False, feedback_id: str | None = None,
                     opts: dict | None = None) -> dict:

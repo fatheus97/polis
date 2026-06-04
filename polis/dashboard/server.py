@@ -52,6 +52,10 @@ class RunIn(BaseModel):
     constitution_court: bool = False
 
 
+class RetryIn(BaseModel):
+    guidance: str = ""
+
+
 class ConfigIn(BaseModel):
     workspace: str | None = None   # "" resets to the managed default
     main_branch: str | None = None
@@ -236,6 +240,14 @@ def create_app(base) -> FastAPI:
         opts = {"max_revisions": body.max_revisions, "architects": body.architects,
                 "constitution_court": body.constitution_court}
         return rm.trigger_run(real=resolve_real_runs(base), feedback_id=body.feedback_id, opts=opts)
+
+    @app.post("/api/runs/{run_id}/retry")
+    def post_retry(run_id: str, body: RetryIn):
+        # Sovereign intervention: re-run an ESCALATED run carrying the human's guidance.
+        res = rm.retry_run(run_id, body.guidance)
+        if "error" in res:
+            raise HTTPException(404 if "not found" in res["error"] else 400, res["error"])
+        return res
 
     @app.post("/api/config")
     def set_config(body: ConfigIn):

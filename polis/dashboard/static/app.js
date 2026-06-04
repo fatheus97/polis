@@ -98,6 +98,16 @@ function renderDetail(d) {
         <span class="who muted">${esc(e.actor)}</span></span>
       <span class="cost">${e.cost ? money(e.cost) : ""}</span>
     </div>`).join("");
+  let html = strip + facts + `<div class="timeline">${rows}</div>`;
+  // ESCALATE hands control to the sovereign: let them add guidance and re-run.
+  if (d.outcome === "ESCALATE") {
+    html += `<div class="retry">
+      <div class="rlabel muted">⚠ Escalated — your call. Add guidance and re-run:</div>
+      <textarea id="retryGuidance" rows="3"
+        placeholder="e.g. make the folder dialog server-side; keep tests hermetic and fast"></textarea>
+      <button id="retryBtn" data-run="${esc(d.run_id)}">↻ Re-run with this guidance</button>
+    </div>`;
+  }
   // Preserve the timeline's scroll across the 2.5s in-flight re-render (only for the SAME
   // run; a fresh selection starts at the top). Stick to the bottom if you were already there.
   const same = d.run_id === state.detailRunId;
@@ -105,9 +115,22 @@ function renderDetail(d) {
   const oldTl = same ? $("detail").querySelector(".timeline") : null;
   const prevTop = oldTl ? oldTl.scrollTop : 0;
   const wasBottom = oldTl && (oldTl.scrollTop + oldTl.clientHeight >= oldTl.scrollHeight - 30);
-  $("detail").innerHTML = strip + facts + `<div class="timeline">${rows}</div>`;
+  $("detail").innerHTML = html;
   const newTl = $("detail").querySelector(".timeline");
   if (newTl && same) newTl.scrollTop = wasBottom ? newTl.scrollHeight : prevTop;
+  const rb = $("retryBtn");
+  if (rb) rb.onclick = () => retryRun(rb.dataset.run, $("retryGuidance").value);
+}
+
+async function retryRun(runId, guidance) {
+  if (!guidance.trim()) return toast("Add some guidance first.");
+  const rb = $("retryBtn");
+  try {
+    const r = await api("POST", `/api/runs/${runId}/retry`, { guidance });
+    if (rb) rb.disabled = true;  // one re-run per click — don't queue (and pay for) a second
+    toast(`Re-running with your guidance (${short(r.job_id, 6)}).`);
+    refresh();
+  } catch (e) { toast(e.message); }
 }
 
 async function selectRun(id) {
