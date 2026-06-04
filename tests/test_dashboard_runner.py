@@ -97,6 +97,29 @@ class ScreenshotDirectiveTest(unittest.TestCase):
         out = self.rm.intake_report(text="no shot here")
         self.assertIsNone(self._directives_for(out["feedback_id"]).get("screenshot_path"))
 
+    def test_clerk_fallback_path_carries_screenshot_path(self):
+        # Route through the async Clerk and force its backend to fail → the fallback path must
+        # still file feedback AND carry the screenshot_path (the 3rd intake site).
+        from polis.projectcfg import write_config
+        write_config(self.base, {"ticketizer": True})
+
+        def _boom():
+            raise RuntimeError("clerk backend unavailable")
+        self.rm._clerk_backend_factory = _boom
+        out = self.rm.intake_report(text="x", screenshot_bytes=b"\x89PNG\r\nimg", screenshot_ext="png")
+        rid = out["report_id"]
+        fb, deadline = None, time.time() + 10
+        while time.time() < deadline:
+            fb = next((p for p in reader.read_pending_feedback(self.base)
+                       if p["directives"].get("report_id") == rid), None)
+            if fb:
+                break
+            time.sleep(0.1)
+        self.assertIsNotNone(fb, "clerk fallback should still file feedback")
+        self.assertEqual(fb["directives"]["source"], "feedback-widget:clerk-fallback")
+        shot = fb["directives"].get("screenshot_path")
+        self.assertTrue(shot and Path(shot).exists())
+
 
 @unittest.skipUnless(HAVE_GIT, "git required for a real stub run")
 class TriggerRunTest(unittest.TestCase):

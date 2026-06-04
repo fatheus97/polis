@@ -81,6 +81,25 @@ class ArchitectGroundingTest(unittest.TestCase):
         self.assertEqual(LLMArchitect(FakeLLM(["x"])).cost, 0.40)
         self.assertEqual(LLMArchitect(FakeLLM(["x"]), grounded=True).cost, 1.00)
 
+    def test_blind_architect_keeps_short_timeout(self):
+        # Backward-compat: a blind architect is a one-shot call — it keeps the 300s default, not 600.
+        fake = FakeLLM([PRD_JSON])
+        LLMArchitect(fake).write_prd(self._fb())
+        self.assertEqual(fake.calls[0]["timeout"], 300)
+
+    def test_grounded_architect_without_cwd_warns(self):
+        fake = FakeLLM([PRD_JSON])
+        with self.assertWarns(UserWarning):
+            LLMArchitect(fake, grounded=True).write_prd(self._fb())  # no cwd
+        self.assertIsNone(fake.calls[0]["cwd"])
+
+    def test_grounded_architect_missing_screenshot_warns(self):
+        fake = FakeLLM([PRD_JSON])
+        with self.assertWarns(UserWarning):
+            LLMArchitect(fake, grounded=True).write_prd(
+                self._fb(screenshot_path="/nope/missing.png"), cwd="/repo")
+        self.assertNotIn("--add-dir", fake.calls[0]["extra_args"])  # missing file is skipped
+
 
 class DevTest(unittest.TestCase):
     def test_captures_workspace_edits_as_diff(self):

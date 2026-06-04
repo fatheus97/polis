@@ -51,8 +51,10 @@ class FeedbackItem:
     submitted_by: str = "tester"
     id: str = field(default_factory=lambda: gen_id("fb"))
     created_at: float = field(default_factory=time.time)
-    # Phase-0 scenario hook: lets tests drive deterministic stub behavior
-    # (e.g. {"dev": "emit_secret"} or {"dev": "fail_n_times", "n": 1}).
+    # Free-form side-channel on a feedback item. Phase-0 scenario hook for deterministic stubs
+    # (e.g. {"dev": "emit_secret"} or {"dev": "fail_n_times", "n": 1}). Well-known keys set by
+    # the dashboard intake: "report_id", "source", "screenshot_path" (absolute path the grounded
+    # architect Reads), "state_summary", "severity". Keep new producers/consumers in sync here.
     directives: dict = field(default_factory=dict)
 
 

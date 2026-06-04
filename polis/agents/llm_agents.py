@@ -110,12 +110,14 @@ def _render_diff(diff: Diff, per_file: int = 20000, total: int = 80000) -> str:
 
 class LLMArchitect(Architect):
     def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float | None = None,
-                 testing_mode: bool = False, grounded: bool = False, timeout: int = 600):
+                 testing_mode: bool = False, grounded: bool = False, timeout: int | None = None):
         # When grounded the architect Reads the repo + the tester screenshot — an agentic call that
-        # costs more and can run long, hence the bumped estimate + longer timeout (same reasoning as
-        # the grounded reviewer). The estimate only sizes the affordability gate.
+        # costs more and can run long, hence the bumped estimate + longer timeout. A blind architect
+        # keeps the cheap one-shot defaults (unchanged behavior). The estimate only sizes the gate.
         if cost_estimate is None:
             cost_estimate = 1.00 if grounded else 0.40
+        if timeout is None:
+            timeout = 600 if grounded else 300
         super().__init__("architect", Branch.LEGISLATIVE, cost_estimate)
         self.backend = backend
         self.model = model
@@ -135,6 +137,9 @@ class LLMArchitect(Architect):
                              "otherwise keep it stable.")
         # Grounding: point the architect at the real repo (cwd) and the tester's screenshot so the
         # PRD names actual files/elements and reflects what the tester saw — not blind guesses.
+        if self.grounded and not cwd:
+            warnings.warn("grounded architect called without cwd — writing a blind PRD",
+                          stacklevel=2)
         extra = list(READONLY_ARGS)
         write_cwd = None
         if self.grounded and cwd:
@@ -147,6 +152,9 @@ class LLMArchitect(Architect):
                 extra += ["--add-dir", str(Path(shot).parent)]
                 parts.append(f"\nA screenshot of the reported UI state is at {shot} — Read it "
                              "(Claude Code renders images) to ground the PRD in what the tester saw.")
+            elif shot:
+                warnings.warn(f"screenshot_path {shot!r} does not exist — PRD written without it",
+                              stacklevel=2)
         parts.append("\nReturn the PRD as JSON now.")
         system = ARCHITECT_SYSTEM + (WIDGET_CRITERION if self.testing_mode else "")
         resp = self.backend.complete("\n".join(parts), system=system, model=self.model,
@@ -177,7 +185,7 @@ class LLMArchitect(Architect):
                               for i, p in enumerate(proposals))
         resp = self.backend.complete(
             f"Competing proposals:\n{listing}\n\nReturn your vote as JSON now.",
-            system=VOTE_SYSTEM, model=self.model, extra_args=READONLY_ARGS)
+            system=VOTE_SYSTEM, model=self.model, extra_args=READONLY_ARGS, timeout=self.timeout)
         self.last_cost = resp.cost_usd
         try:
             idx = int(extract_json(resp.text).get("choice", 0))
