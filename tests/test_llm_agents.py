@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from polis.agents.llm_agents import ClaudeCodeDev, LLMArchitect, LLMReviewer
+from polis.agents.llm_agents import READONLY_ARGS, ClaudeCodeDev, LLMArchitect, LLMReviewer
 from polis.constitution import Constitution
 from polis.llm import FakeLLM, LLMError, LLMResponse
 from polis.models import Diff, FeedbackItem, FileChange, PRD, Stage, TestResult
@@ -41,6 +41,45 @@ class ArchitectTest(unittest.TestCase):
         fake = FakeLLM(["sorry, no JSON here"])
         prd = LLMArchitect(fake).write_prd(FeedbackItem(text="do the thing"))
         self.assertIn("do the thing", prd.goal)  # fell back to feedback text
+
+
+class ArchitectGroundingTest(unittest.TestCase):
+    """A grounded architect reads the real repo (cwd) + the tester screenshot, so the PRD names
+    actual files/elements; the default architect stays blind (backward-compat)."""
+
+    def _fb(self, **directives):
+        return FeedbackItem(text="the headings are too close to the left edge", directives=directives)
+
+    def test_grounded_architect_reads_repo_and_screenshot(self):
+        shot = Path(tempfile.mkdtemp(prefix="polis-shot-")) / "s.png"
+        shot.write_bytes(b"\x89PNG\r\n")
+        fake = FakeLLM([LLMResponse(text=PRD_JSON, cost_usd=0.2)])
+        LLMArchitect(fake, grounded=True).write_prd(self._fb(screenshot_path=str(shot)), cwd="/repo")
+        call = fake.calls[0]
+        self.assertEqual(call["cwd"], "/repo")                  # reads the real code
+        self.assertIn("--add-dir", call["extra_args"])          # screenshot dir whitelisted
+        self.assertIn(str(shot.parent), call["extra_args"])
+        self.assertIn(str(shot), call["prompt"])                # told to Read the image
+        self.assertIn("Read/Grep/Glob", call["prompt"])
+        self.assertEqual(call["timeout"], 600)                  # agentic -> longer window
+
+    def test_grounded_architect_without_screenshot_still_specs(self):
+        fake = FakeLLM([PRD_JSON])
+        prd = LLMArchitect(fake, grounded=True).write_prd(self._fb(), cwd="/repo")
+        self.assertEqual(prd.title, "Health")                   # still produced a PRD
+        self.assertEqual(fake.calls[0]["cwd"], "/repo")
+        self.assertNotIn("--add-dir", fake.calls[0]["extra_args"])  # no screenshot -> no add-dir
+
+    def test_default_architect_is_blind(self):
+        fake = FakeLLM([PRD_JSON])
+        LLMArchitect(fake).write_prd(self._fb(screenshot_path="/whatever"), cwd="/repo")
+        self.assertIsNone(fake.calls[0]["cwd"])                 # default = today's behavior
+        self.assertEqual(fake.calls[0]["extra_args"], READONLY_ARGS)
+        self.assertNotIn("Read/Grep/Glob", fake.calls[0]["prompt"])
+
+    def test_architect_cost_estimate_is_self_contained(self):
+        self.assertEqual(LLMArchitect(FakeLLM(["x"])).cost, 0.40)
+        self.assertEqual(LLMArchitect(FakeLLM(["x"]), grounded=True).cost, 1.00)
 
 
 class DevTest(unittest.TestCase):

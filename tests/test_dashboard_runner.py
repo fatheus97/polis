@@ -70,6 +70,34 @@ class WriteActionsTest(unittest.TestCase):
             self.rm.appropriate(0)
 
 
+class ScreenshotDirectiveTest(unittest.TestCase):
+    """The tester's screenshot path rides on the feedback directives, so a grounded Architect can
+    Read the image without the core ever touching ReportStore."""
+
+    def setUp(self):
+        from polis.projectcfg import write_config
+        self.base = Path(tempfile.mkdtemp(prefix="polis-shotdir-"))
+        write_config(self.base, {"ticketizer": False})  # immediate feedback, no Clerk LLM call
+        self.rm = RunManager(self.base)
+
+    def tearDown(self):
+        self.rm.shutdown()
+
+    def _directives_for(self, feedback_id):
+        pend = reader.read_pending_feedback(self.base)
+        return next(p for p in pend if p["id"] == feedback_id)["directives"]
+
+    def test_intake_puts_absolute_screenshot_path_in_directives(self):
+        out = self.rm.intake_report(text="headings too close to edge",
+                                    screenshot_bytes=b"\x89PNG\r\n\x1a\nimg", screenshot_ext="png")
+        shot = self._directives_for(out["feedback_id"]).get("screenshot_path")
+        self.assertTrue(shot and Path(shot).is_absolute() and Path(shot).exists())
+
+    def test_intake_without_screenshot_has_none_path(self):
+        out = self.rm.intake_report(text="no shot here")
+        self.assertIsNone(self._directives_for(out["feedback_id"]).get("screenshot_path"))
+
+
 @unittest.skipUnless(HAVE_GIT, "git required for a real stub run")
 class TriggerRunTest(unittest.TestCase):
     def setUp(self):

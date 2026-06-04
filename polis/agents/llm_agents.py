@@ -13,6 +13,7 @@ Each call records its actual USD cost in ``self.last_cost`` for the Treasury.
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 
 from ..llm import LLMBackend, LLMError, extract_json
 from ..models import Branch, Diff, PRD, Verdict
@@ -108,14 +109,21 @@ def _render_diff(diff: Diff, per_file: int = 20000, total: int = 80000) -> str:
 
 
 class LLMArchitect(Architect):
-    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float = 0.40,
-                 testing_mode: bool = False):
+    def __init__(self, backend: LLMBackend, model: str = "sonnet", cost_estimate: float | None = None,
+                 testing_mode: bool = False, grounded: bool = False, timeout: int = 600):
+        # When grounded the architect Reads the repo + the tester screenshot — an agentic call that
+        # costs more and can run long, hence the bumped estimate + longer timeout (same reasoning as
+        # the grounded reviewer). The estimate only sizes the affordability gate.
+        if cost_estimate is None:
+            cost_estimate = 1.00 if grounded else 0.40
         super().__init__("architect", Branch.LEGISLATIVE, cost_estimate)
         self.backend = backend
         self.model = model
         self.testing_mode = testing_mode
+        self.grounded = grounded
+        self.timeout = timeout
 
-    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback=""):
+    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback="", cwd=None):
         parts = [f"Tester feedback:\n{feedback.text}"]
         if repo_summary:
             parts.append(f"\nRepository summary:\n{repo_summary}")
@@ -125,10 +133,24 @@ class LLMArchitect(Architect):
                 parts.append(f"\nThe reviewer rejected the last attempt: {review_feedback}\n"
                              "Only change the spec if it was ambiguous or wrong; "
                              "otherwise keep it stable.")
+        # Grounding: point the architect at the real repo (cwd) and the tester's screenshot so the
+        # PRD names actual files/elements and reflects what the tester saw — not blind guesses.
+        extra = list(READONLY_ARGS)
+        write_cwd = None
+        if self.grounded and cwd:
+            write_cwd = cwd
+            parts.append("\nThe current working directory IS the repository — use Read/Grep/Glob to "
+                         "ground this PRD in the ACTUAL code (real file names and element/symbol "
+                         "names), so the acceptance criteria are concrete and checkable, not guesses.")
+            shot = (feedback.directives or {}).get("screenshot_path")
+            if shot and Path(shot).exists():
+                extra += ["--add-dir", str(Path(shot).parent)]
+                parts.append(f"\nA screenshot of the reported UI state is at {shot} — Read it "
+                             "(Claude Code renders images) to ground the PRD in what the tester saw.")
         parts.append("\nReturn the PRD as JSON now.")
         system = ARCHITECT_SYSTEM + (WIDGET_CRITERION if self.testing_mode else "")
-        resp = self.backend.complete("\n".join(parts), system=system,
-                                     model=self.model, extra_args=READONLY_ARGS)
+        resp = self.backend.complete("\n".join(parts), system=system, model=self.model,
+                                     cwd=write_cwd, extra_args=extra, timeout=self.timeout)
         self.last_cost = resp.cost_usd
         revision = (prior.revision + 1) if prior else 0
         try:
