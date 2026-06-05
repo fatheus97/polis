@@ -232,6 +232,14 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.headers["content-type"].startswith("application/javascript"))
 
+    def test_styles_css_aligns_row_inputs(self):
+        r = self.client.get("/static/styles.css")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.headers["content-type"].startswith("text/css"))
+        css = r.text
+        self.assertIn(".row > input", css)
+        self.assertRegex(css, r"\.row\s*>\s*input\s*\{[^}]*flex:\s*1")
+
     def test_static_served_from_startup_snapshot_immune_to_disk_edits(self):
         # THE FIX: a self-dev run rewrites app.js/index.html in the working tree mid-run; the
         # running dashboard must keep serving the version captured at startup, not the
