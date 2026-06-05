@@ -79,6 +79,9 @@ body { margin: 0; }
 .chk { margin: 0; font-size: .85rem; display: inline-flex; gap: .25rem; align-items: center; }
 form { margin-bottom: .5rem; }
 button { padding: .35rem .7rem; margin: 0; }
+.repo { display: flex; flex-direction: column; gap: .4rem; margin-bottom: .5rem; }
+.repo-msg { display: flex; gap: .5rem; align-items: center; font-size: .8rem; }
+.repo-msg .err { color: var(--warn, #e0a050); }
 .jobs { font-size: .78rem; display: flex; flex-direction: column; gap: .2rem; }
 .toast { position: fixed; bottom: 1rem; right: 1rem; padding: .5rem .8rem; border-radius: 8px;
   background: var(--pico-card-background-color); border: 1px solid var(--b-legislative); }

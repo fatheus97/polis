@@ -311,42 +311,71 @@ async function runTicket(feedbackId) {
     toast(`Run queued (${short(r.job_id, 6)}).`); refresh();
   } catch (e) { toast(e.message); }
 }
-$("repoForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const ws = $("repoPath").value.trim();
-  if (ws && !confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
-  const branch = $("repoBranchSelect").value || null;
-  try {
-    await api("POST", "/api/config", { workspace: ws, main_branch: branch });
-    $("repoPath").value = "";
-    $("repoBranchSelect").innerHTML = '<option value="">— branch —</option>';
-    toast("Target repo set."); loadConfig();
-  } catch (err) { toast(err.message); }
-};
+async function applyRepo(path, branch) {
+  await api("POST", "/api/config", { workspace: path, main_branch: branch || null });
+  $("repoMsg").hidden = true;
+  $("repoMsg").innerHTML = "";
+  toast("Target repo set.");
+  loadConfig();
+  loadBranches(path);
+}
+
+function showRepoNeedsInit(path) {
+  const m = $("repoMsg");
+  m.hidden = false;
+  m.innerHTML = `<span class="err">Not a git repo: ${esc(path)}</span>
+    <button type="button" id="repoInitBtn">Initialise with git init</button>`;
+  $("repoInitBtn").onclick = async () => {
+    try {
+      await api("POST", "/api/repo-init", { path });
+      await applyRepo(path);
+    } catch (e) {
+      m.innerHTML = `<span class="err">git init failed: ${esc(e.message)}</span>`;
+    }
+  };
+}
+
+function revealFallback(msg) {
+  $("repoForm").hidden = false;
+  $("repoPath").hidden = false;
+  $("repoPath").focus();
+  toast(msg);
+}
 
 $("browsePath").onclick = async () => {
   try {
     const r = await fetch("/api/browse", { method: "POST" });
     if (r.status === 200) {
-      const { path } = await r.json();
-      $("repoPath").hidden = false;
-      $("repoPath").value = path;
-      await loadBranches(path);
-      toast(`Selected: ${path}`);
+      const { path, is_git } = await r.json();
+      if (is_git) await applyRepo(path);
+      else showRepoNeedsInit(path);
     } else {
-      // 204: no picker available — reveal the text field as fallback
-      $("repoPath").hidden = false;
-      $("repoPath").focus();
-      toast("No folder picker available — type the repo path here.");
+      revealFallback("No folder picker available — type the repo path here.");
     }
   } catch (e) {
-    $("repoPath").hidden = false;
-    $("repoPath").focus();
-    toast("Couldn't open the picker — type the repo path here.");
+    revealFallback("Couldn't open the picker — type the repo path here.");
   }
 };
 
-$("repoPath").onblur = () => { const p = $("repoPath").value.trim(); if (p) loadBranches(p); };
+$("repoForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const ws = $("repoPath").value.trim();
+  if (!ws) return;
+  try {
+    const { is_git } = await api("GET", `/api/repo-check?path=${encodeURIComponent(ws)}`);
+    if (is_git) await applyRepo(ws, $("repoBranchSelect").value);
+    else showRepoNeedsInit(ws);
+  } catch (err) { toast(err.message); }
+};
+
+$("repoBranchSelect").onchange = async () => {
+  const b = $("repoBranchSelect").value;
+  if (!b) return;
+  try {
+    const c = await api("GET", "/api/config");
+    if (!c.managed_default && c.workspace) await applyRepo(c.workspace, b);
+  } catch (e) { toast(e.message); }
+};
 
 // Restore UI state across reloads (incl. Ctrl-Shift-R): the selected run + run-row options.
 try {

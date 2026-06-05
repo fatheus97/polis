@@ -89,19 +89,24 @@ class BrowseVisibilityTest(unittest.TestCase):
         # toast() must be called in that branch.
         self.assertIn('toast(', js)
 
-    def test_browse_handler_confirms_path_on_success(self):
-        """app.js browse handler must toast the selected path and call loadBranches on 200.
+    def test_browse_handler_applies_immediately_on_success(self):
+        """app.js browse handler must apply the picked path immediately (no confirm gate).
 
+        When /api/browse returns 200 with is_git=true, applyRepo(path) is called
+        directly — no intermediate text input or confirm() dialog required.
         Asserts served JS content — not a live browser click simulation.
         """
         r = self.client.get("/static/app.js")
         self.assertEqual(r.status_code, 200)
         js = r.text
-        # The 200 branch must reveal the input, show the path, and load branches.
-        self.assertIn('Selected:', js)
+        # 200 branch reads is_git and calls applyRepo immediately.
+        self.assertIn('is_git', js)
+        self.assertIn('applyRepo(path)', js)
+        # loadBranches is still called (inside applyRepo).
         self.assertIn('loadBranches(path)', js)
-        # Confirmation toast present.
-        self.assertIn('toast(`Selected:', js)
+        # Old "Selected:" confirm/toast removed — apply is immediate.
+        self.assertNotIn('toast(`Selected:', js)
+        self.assertNotIn('confirm(', js)
 
     def test_setrepo_still_posts_repopath_value(self):
         """app.js #repoForm submit must still read $("repoPath").value and POST /api/config.
