@@ -109,6 +109,32 @@ class PullRequestMergerTest(unittest.TestCase):
             m.merge(types.SimpleNamespace(path="/x"), "polis/b", "msg")
 
 
+class SyncMainTest(unittest.TestCase):
+    def test_pr_merger_syncs_local_main_to_origin(self):
+        # Before branching, fast-forward local main to origin/main so no run builds on a stale base.
+        runner = ScriptRunner()
+        m = PullRequestMerger(main_branch="main")
+        m._run = runner
+        m.sync_main(types.SimpleNamespace(path="/tmp/repo"))
+        verbs = [tuple(c) for c in runner.calls]
+        self.assertIn(("git", "fetch", "origin"), verbs)
+        self.assertIn(("git", "checkout", "main"), verbs)
+        self.assertIn(("git", "reset", "--hard", "origin/main"), verbs)
+        self.assertNotIn(("git", "push", "origin", "main"), verbs)  # never pushes main
+
+    def test_pr_merger_sync_is_noop_without_origin(self):
+        # No origin → nothing to sync against; must not raise or run fetch/reset.
+        runner = ScriptRunner(fail_cmd=("git", "remote", "get-url"))
+        m = PullRequestMerger()
+        m._run = runner
+        m.sync_main(types.SimpleNamespace(path="/x"))  # no exception
+        verbs = [tuple(c)[:2] for c in runner.calls]
+        self.assertNotIn(("git", "fetch"), verbs)
+
+    def test_local_merger_sync_is_noop(self):
+        LocalMerger().sync_main(FakeWorkspace())  # local main IS the source — nothing to do
+
+
 class OrchestratorMergerSeamTest(unittest.TestCase):
     def test_run_routes_merge_through_injected_merger(self):
         from polis.models import FeedbackItem
@@ -120,6 +146,15 @@ class OrchestratorMergerSeamTest(unittest.TestCase):
         self.assertEqual(len(h.workspace.merges), 0)   # NOT the workspace's local merge
         _branch, msg = fm.calls[0]
         self.assertIn(res.run_id, msg)
+
+    def test_run_syncs_main_before_branching(self):
+        # The orchestrator must sync local main to the source-of-truth at the start of every run,
+        # so a run never branches from a stale base (the cause of the PR-conflict escalation).
+        from polis.models import FeedbackItem
+        fm = FakeMerger()
+        h = Harness(sandbox=ScriptedSandbox([passing()]), merger=fm)
+        h.orch.process(FeedbackItem(text="add a feature"))
+        self.assertEqual(fm.synced, [h.workspace])  # synced the run's workspace before branching
 
 
 if __name__ == "__main__":

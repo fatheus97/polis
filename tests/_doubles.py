@@ -61,6 +61,10 @@ class FakeMerger:
 
     def __init__(self):
         self.calls: list = []  # (branch, message)
+        self.synced: list = []  # workspaces passed to sync_main (before branching)
+
+    def sync_main(self, workspace):
+        self.synced.append(workspace)
 
     def merge(self, workspace, branch, message):
         sha = f"{len(self.calls):04d}deadbeefcafef00d"

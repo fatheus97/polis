@@ -28,6 +28,11 @@ class Merger:
     def merge(self, workspace: Workspace, branch: str, message: str) -> str:
         raise NotImplementedError
 
+    def sync_main(self, workspace: Workspace) -> None:
+        """Bring the workspace's local main up to the merge source-of-truth BEFORE a run branches,
+        so no run builds on a stale base. Default: no-op (local main IS the source of truth)."""
+        return None
+
 
 class LocalMerger(Merger):
     """The historical behavior: a local ``git merge --no-ff`` into main (no remote)."""
@@ -57,6 +62,22 @@ class PullRequestMerger(Merger):
     def _run(self, cwd, *args, timeout: float = 120):
         return subprocess.run(list(args), cwd=str(cwd),
                               capture_output=True, text=True, timeout=timeout)
+
+    def sync_main(self, workspace) -> None:
+        """Fast-forward the workspace's local main to origin/main BEFORE a run branches. The
+        post-merge sync (in merge()) can lag across separate runs or dashboard restarts; without
+        this, a run can branch from a stale local main and conflict with an already-merged sibling
+        run that touched the same files. Best-effort: a missing origin or a transient git error must
+        NOT block the run — it just falls back to whatever local main is (the old behavior)."""
+        cwd, main = workspace.path, self.main_branch
+        try:
+            if self._run(cwd, "git", "remote", "get-url", "origin").returncode != 0:
+                return  # no origin to sync against (e.g. a local-only repo)
+            self._run(cwd, "git", "fetch", "origin", timeout=120)
+            self._run(cwd, "git", "checkout", main, timeout=60)
+            self._run(cwd, "git", "reset", "--hard", f"origin/{main}", timeout=60)
+        except subprocess.TimeoutExpired:
+            return
 
     def merge(self, workspace: Workspace, branch: str, message: str) -> str:
         cwd = workspace.path

@@ -128,6 +128,12 @@ class Orchestrator:
                 instance=agent.instance_id, branch_of=agent.branch.value)
 
         try:
+            # Branch every run from the MERGED tip: bring local main up to the source-of-truth
+            # before SPEC, so the grounded architect reads current code and start_change can't build
+            # on a stale base (which would conflict with an already-merged sibling run). No-op for a
+            # local merge; best-effort fetch+reset for a PR merge.
+            self.merger.sync_main(ws)
+
             # Optional staffing cost (a spawn debits the treasury too).
             if cfg.spawn_cost > 0:
                 need = cfg.spawn_cost * 3
