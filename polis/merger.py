@@ -78,7 +78,11 @@ class PullRequestMerger(Merger):
                 warnings.warn("sync_main: git fetch failed — branching from local main (may be "
                               "stale)", stacklevel=2)
                 return
-            self._run(cwd, "git", "checkout", main, timeout=60)
+            if self._run(cwd, "git", "checkout", main, timeout=60).returncode != 0:
+                # Don't `reset --hard` whatever branch is checked out — leave the workspace as-is.
+                warnings.warn("sync_main: git checkout main failed — leaving the workspace as-is",
+                              stacklevel=2)
+                return
             self._run(cwd, "git", "reset", "--hard", f"origin/{main}", timeout=60)
         except (subprocess.SubprocessError, OSError) as e:  # timeout, git-not-found, etc.
             warnings.warn(f"sync_main skipped ({e}) — branching from local main", stacklevel=2)
