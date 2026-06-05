@@ -183,6 +183,19 @@ class DashboardServerTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertNotIn('FEEDBACK_WIDGET_PLACEHOLDER', r.text)
 
+    def test_court_checkbox_uses_full_constitutional_court_label(self):
+        html = self.client.get("/").text
+        self.assertIn("Constitutional Court", html)
+        self.assertIn('id="runCourt"', html)
+        self.assertNotIn("> court</label>", html)
+
+    def test_testing_mode_embeds_feedback_widget_script(self):
+        from polis.projectcfg import write_config
+        self.assertNotIn("feedback-widget.js", self.client.get("/").text)
+        write_config(self.base, {"testing_mode": True})
+        html = self.client.get("/").text
+        self.assertIn('<script src="/static/feedback-widget.js"></script>', html)
+
     def test_supervise_relaunches_on_restart_code_then_stops(self):
         # The supervisor relaunches the child while it exits with _RESTART_EXIT_CODE (a
         # self-dev merge), and stops + propagates any other exit code.
