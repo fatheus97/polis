@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+import warnings
 
 from .workspace import MergeConflict, Workspace
 
@@ -31,7 +32,6 @@ class Merger:
     def sync_main(self, workspace: Workspace) -> None:
         """Bring the workspace's local main up to the merge source-of-truth BEFORE a run branches,
         so no run builds on a stale base. Default: no-op (local main IS the source of truth)."""
-        return None
 
 
 class LocalMerger(Merger):
@@ -73,10 +73,15 @@ class PullRequestMerger(Merger):
         try:
             if self._run(cwd, "git", "remote", "get-url", "origin").returncode != 0:
                 return  # no origin to sync against (e.g. a local-only repo)
-            self._run(cwd, "git", "fetch", "origin", timeout=120)
+            if self._run(cwd, "git", "fetch", "origin", timeout=120).returncode != 0:
+                # Don't reset to a possibly-stale origin ref — surface it and keep local main.
+                warnings.warn("sync_main: git fetch failed — branching from local main (may be "
+                              "stale)", stacklevel=2)
+                return
             self._run(cwd, "git", "checkout", main, timeout=60)
             self._run(cwd, "git", "reset", "--hard", f"origin/{main}", timeout=60)
-        except subprocess.TimeoutExpired:
+        except (subprocess.SubprocessError, OSError) as e:  # timeout, git-not-found, etc.
+            warnings.warn(f"sync_main skipped ({e}) — branching from local main", stacklevel=2)
             return
 
     def merge(self, workspace: Workspace, branch: str, message: str) -> str:

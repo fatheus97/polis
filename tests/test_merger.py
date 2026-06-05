@@ -131,6 +131,16 @@ class SyncMainTest(unittest.TestCase):
         verbs = [tuple(c)[:2] for c in runner.calls]
         self.assertNotIn(("git", "fetch"), verbs)
 
+    def test_pr_merger_sync_warns_and_skips_reset_on_fetch_failure(self):
+        # A failed fetch must NOT reset to a possibly-stale origin ref — warn + keep local main.
+        runner = ScriptRunner(fail_cmd=("git", "fetch"))
+        m = PullRequestMerger()
+        m._run = runner
+        with self.assertWarns(UserWarning):
+            m.sync_main(types.SimpleNamespace(path="/x"))
+        verbs = [tuple(c)[:2] for c in runner.calls]
+        self.assertNotIn(("git", "reset"), verbs)  # never reset to a stale ref
+
     def test_local_merger_sync_is_noop(self):
         LocalMerger().sync_main(FakeWorkspace())  # local main IS the source — nothing to do
 
@@ -154,7 +164,9 @@ class OrchestratorMergerSeamTest(unittest.TestCase):
         fm = FakeMerger()
         h = Harness(sandbox=ScriptedSandbox([passing()]), merger=fm)
         h.orch.process(FeedbackItem(text="add a feature"))
-        self.assertEqual(fm.synced, [h.workspace])  # synced the run's workspace before branching
+        self.assertEqual(fm.synced, [h.workspace])  # synced the run's workspace...
+        self.assertEqual(fm.order[0], "sync")       # ...and did so BEFORE the merge
+        self.assertIn("merge", fm.order)
 
 
 if __name__ == "__main__":
