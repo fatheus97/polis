@@ -26,14 +26,15 @@
         <header>Control panel</header>
         <div class="repo">
           <div class="muted" id="repoCurrent">target repo: …</div>
-          <form id="repoForm" class="row">
+          <form id="repoForm" class="row repo-row">
             <input id="repoPath" placeholder="path to the repo Polis develops" />
             <button type="button" id="browsePath" class="secondary">Browse…</button>
             <select id="repoBranchSelect" style="max-width:7rem" title="select branch">
               <option value="">— branch —</option>
             </select>
-            <button type="submit" class="secondary">Set repo</button>
+            <button type="submit" class="secondary" title="set a manually-typed path">Use</button>
           </form>
+          <div id="repoNotice" class="repo-notice" hidden></div>
         </div>
         <form id="budgetForm" class="row">
           <input type="number" id="budgetAmount" placeholder="fund amount" step="1" min="1" />

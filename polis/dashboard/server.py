@@ -101,6 +101,10 @@ class ConfigIn(BaseModel):
     real_runs: bool | None = None
 
 
+class RepoInitIn(BaseModel):
+    path: str
+
+
 def create_app(base) -> FastAPI:
     base = Path(base)
     rm = RunManager(base)
@@ -308,13 +312,43 @@ def create_app(base) -> FastAPI:
             from tkinter import filedialog
             root = tk.Tk()
             root.withdraw()
+            root.attributes("-topmost", True)
+            root.lift()
+            root.focus_force()
             path = filedialog.askdirectory(parent=root)
             root.destroy()
         except Exception:
             return Response(status_code=204)
         if not path:
             return Response(status_code=204)
-        return {"path": str(Path(path).resolve())}
+        p = Path(path).resolve()
+        return {"path": str(p), "is_git": (p / ".git").is_dir()}
+
+    @app.get("/api/repo-status")
+    def repo_status(path: str = Query("")):
+        """Check whether a folder exists and contains a .git directory."""
+        if not path:
+            return {"exists": False, "is_git": False, "path": ""}
+        p = Path(path).resolve()
+        return {"exists": p.is_dir(), "is_git": (p / ".git").is_dir(), "path": str(p)}
+
+    @app.post("/api/repo-init")
+    def repo_init(body: RepoInitIn):
+        """Initialise a folder as a git repo (git init -b main); idempotent if already a repo."""
+        p = Path(body.path).resolve()
+        if not p.is_dir():
+            raise HTTPException(400, "folder does not exist")
+        if (p / ".git").is_dir():
+            return {"ok": True, "is_git": True}
+        try:
+            r = subprocess.run(
+                ["git", "init", "-b", resolve_main_branch(base), str(p)],
+                capture_output=True, text=True, timeout=10)
+        except Exception as e:
+            raise HTTPException(500, f"git init failed: {e}")
+        if r.returncode != 0:
+            raise HTTPException(500, f"git init failed: {(r.stderr or r.stdout).strip()}")
+        return {"ok": True, "is_git": True}
 
     @app.get("/api/branches")
     def list_branches(path: str = Query("")):

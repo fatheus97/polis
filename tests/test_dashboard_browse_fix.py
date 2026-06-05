@@ -86,6 +86,19 @@ class BrowseButtonUiTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertNotIn("feedback-widget.js", r.text)
 
+    def test_repo_notice_container_present(self):
+        """Inline error container for non-git detection must be in the page."""
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('id="repoNotice"', r.text)
+
+    def test_set_repo_button_replaced_with_use(self):
+        """'Set repo' submit button is gone; the slimmer 'Use' label replaces it."""
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(">Set repo<", r.text)
+        self.assertIn(">Use<", r.text)
+
 
 if __name__ == "__main__":
     unittest.main()

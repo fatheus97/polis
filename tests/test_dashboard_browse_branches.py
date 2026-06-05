@@ -51,6 +51,23 @@ class BrowseEndpointTest(unittest.TestCase):
             shutil.rmtree(known, ignore_errors=True)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["path"], known)
+        self.assertIn(r.json()["is_git"], (True, False))  # field is always present
+
+    @unittest.skipUnless(HAVE_TKINTER, "tkinter not available")
+    def test_browse_raises_dialog_to_front_before_askdirectory(self):
+        chosen = str(Path(tempfile.mkdtemp(prefix="polis-pick-")).resolve())
+        try:
+            mock_root = mock.MagicMock()
+            with mock.patch("tkinter.Tk", return_value=mock_root), \
+                 mock.patch("tkinter.filedialog.askdirectory", return_value=chosen) as ad:
+                r = self.client.post("/api/browse")
+            mock_root.attributes.assert_any_call("-topmost", True)
+            mock_root.lift.assert_called()
+            mock_root.focus_force.assert_called()
+            self.assertTrue(mock_root.focus_force.called and ad.called)
+            self.assertEqual(r.status_code, 200)
+        finally:
+            shutil.rmtree(chosen, ignore_errors=True)
 
     @unittest.skipUnless(HAVE_TKINTER, "tkinter not available")
     def test_browse_no_display_returns_204_no_body(self):
@@ -169,6 +186,68 @@ class WidgetTestingModeTest(unittest.TestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
         self.assertNotIn("feedback-widget.js", r.text)
+
+
+@unittest.skipUnless(HAVE_FASTAPI, "install the dashboard extra (pip install -e '.[dashboard]' httpx)")
+class RepoStatusInitTest(unittest.TestCase):
+    def setUp(self):
+        self.base = Path(tempfile.mkdtemp(prefix="polis-rsinit-"))
+        self.tmp = Path(tempfile.mkdtemp(prefix="polis-rs-"))
+        self.client = TestClient(create_app(self.base))
+
+    def tearDown(self):
+        shutil.rmtree(self.base, ignore_errors=True)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_repo_status_no_path_empty(self):
+        r = self.client.get("/api/repo-status")
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertFalse(data["exists"])
+        self.assertFalse(data["is_git"])
+
+    def test_repo_status_non_git_dir(self):
+        r = self.client.get("/api/repo-status", params={"path": str(self.tmp)})
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertTrue(data["exists"])
+        self.assertFalse(data["is_git"])
+
+    @unittest.skipUnless(HAVE_GIT, "git not available")
+    def test_repo_init_creates_git_repo_with_main_branch(self):
+        r = self.client.post("/api/repo-init", json={"path": str(self.tmp)})
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["is_git"])
+        self.assertTrue((self.tmp / ".git").is_dir())
+        result = subprocess.run(
+            ["git", "-C", str(self.tmp), "symbolic-ref", "--short", "HEAD"],
+            capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), "main")
+        r2 = self.client.get("/api/repo-status", params={"path": str(self.tmp)})
+        self.assertTrue(r2.json()["is_git"])
+
+    def test_repo_init_missing_dir_errors(self):
+        nonexistent = str(self.tmp / "does_not_exist")
+        r = self.client.post("/api/repo-init", json={"path": nonexistent})
+        self.assertEqual(r.status_code, 400)
+
+    def test_repo_init_failure_is_honest(self):
+        fake_result = mock.MagicMock()
+        fake_result.returncode = 1
+        fake_result.stderr = "boom"
+        fake_result.stdout = ""
+        with mock.patch("polis.dashboard.server.subprocess.run", return_value=fake_result):
+            r = self.client.post("/api/repo-init", json={"path": str(self.tmp)})
+        self.assertEqual(r.status_code, 500)
+        self.assertIn("boom", r.json().get("detail", ""))
+
+    def test_repo_init_idempotent_if_already_git(self):
+        (self.tmp / ".git").mkdir()
+        r = self.client.post("/api/repo-init", json={"path": str(self.tmp)})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["is_git"])
 
 
 if __name__ == "__main__":

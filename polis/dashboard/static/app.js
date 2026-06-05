@@ -311,28 +311,54 @@ async function runTicket(feedbackId) {
     toast(`Run queued (${short(r.job_id, 6)}).`); refresh();
   } catch (e) { toast(e.message); }
 }
+async function applyRepo(path, branch) {
+  await api("POST", "/api/config", { workspace: path, main_branch: branch || null });
+  toast("Target repo set.");
+  loadConfig();
+  repoNotice("");
+}
+
+function repoNotice(msg, opts) {
+  const el = $("repoNotice");
+  if (!msg) { el.innerHTML = ""; el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<span class="err">${esc(msg)}</span>` +
+    (opts && opts.initPath
+      ? ` <button type="button" id="repoInitBtn" class="secondary">Initialise as git repo</button>`
+      : "");
+  const b = $("repoInitBtn");
+  if (b) b.onclick = () => initRepo(opts.initPath);
+}
+
+async function initRepo(path) {
+  try {
+    await api("POST", "/api/repo-init", { path });
+    await applyRepo(path, null);
+  } catch (e) { repoNotice(e.message); }
+}
+
 $("repoForm").onsubmit = async (e) => {
   e.preventDefault();
   const ws = $("repoPath").value.trim();
-  if (ws && !confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
-  const branch = $("repoBranchSelect").value || null;
+  if (!ws) return;
+  if (!confirm(`Point Polis at:\n${ws}\n\nThe agents will branch, commit, and merge into this repo. Continue?`)) return;
   try {
-    await api("POST", "/api/config", { workspace: ws, main_branch: branch });
+    const st = await api("GET", `/api/repo-status?path=${encodeURIComponent(ws)}`);
+    if (!st.is_git) return repoNotice(`"${st.path}" is not a git repository.`, { initPath: st.path });
+    await applyRepo(st.path, $("repoBranchSelect").value);
     $("repoPath").value = "";
     $("repoBranchSelect").innerHTML = '<option value="">— branch —</option>';
-    toast("Target repo set."); loadConfig();
-  } catch (err) { toast(err.message); }
+  } catch (err) { repoNotice(err.message); }
 };
 
 $("browsePath").onclick = async () => {
   try {
     const r = await fetch("/api/browse", { method: "POST" });
-    if (r.status === 200) {
-      const { path } = await r.json();
-      $("repoPath").value = path;
-      await loadBranches(path);
-    }
-    // 204 means no dialog available — text field stays editable as fallback
+    if (r.status !== 200) return;   // 204 → no dialog; text field stays editable as fallback
+    const { path, is_git } = await r.json();
+    $("repoPath").value = path;
+    if (is_git) { await loadBranches(path); await applyRepo(path, $("repoBranchSelect").value); }
+    else repoNotice(`"${path}" is not a git repository.`, { initPath: path });
   } catch (e) { /* ignore */ }
 };
 
