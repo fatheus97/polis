@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+import warnings
 
 from .workspace import MergeConflict, Workspace
 
@@ -27,6 +28,10 @@ class Merger:
 
     def merge(self, workspace: Workspace, branch: str, message: str) -> str:
         raise NotImplementedError
+
+    def sync_main(self, workspace: Workspace) -> None:
+        """Bring the workspace's local main up to the merge source-of-truth BEFORE a run branches,
+        so no run builds on a stale base. Default: no-op (local main IS the source of truth)."""
 
 
 class LocalMerger(Merger):
@@ -57,6 +62,31 @@ class PullRequestMerger(Merger):
     def _run(self, cwd, *args, timeout: float = 120):
         return subprocess.run(list(args), cwd=str(cwd),
                               capture_output=True, text=True, timeout=timeout)
+
+    def sync_main(self, workspace) -> None:
+        """Fast-forward the workspace's local main to origin/main BEFORE a run branches. The
+        post-merge sync (in merge()) can lag across separate runs or dashboard restarts; without
+        this, a run can branch from a stale local main and conflict with an already-merged sibling
+        run that touched the same files. Best-effort: a missing origin or a transient git error must
+        NOT block the run — it just falls back to whatever local main is (the old behavior)."""
+        cwd, main = workspace.path, self.main_branch
+        try:
+            if self._run(cwd, "git", "remote", "get-url", "origin").returncode != 0:
+                return  # no origin to sync against (e.g. a local-only repo)
+            if self._run(cwd, "git", "fetch", "origin", timeout=120).returncode != 0:
+                # Don't reset to a possibly-stale origin ref — surface it and keep local main.
+                warnings.warn("sync_main: git fetch failed — branching from local main (may be "
+                              "stale)", stacklevel=2)
+                return
+            if self._run(cwd, "git", "checkout", main, timeout=60).returncode != 0:
+                # Don't `reset --hard` whatever branch is checked out — leave the workspace as-is.
+                warnings.warn("sync_main: git checkout main failed — leaving the workspace as-is",
+                              stacklevel=2)
+                return
+            self._run(cwd, "git", "reset", "--hard", f"origin/{main}", timeout=60)
+        except (subprocess.SubprocessError, OSError) as e:  # timeout, git-not-found, etc.
+            warnings.warn(f"sync_main skipped ({e}) — branching from local main", stacklevel=2)
+            return
 
     def merge(self, workspace: Workspace, branch: str, message: str) -> str:
         cwd = workspace.path
