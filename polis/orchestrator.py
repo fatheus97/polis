@@ -21,6 +21,7 @@ import subprocess
 from dataclasses import dataclass
 
 from .constitution import Constitution
+from .lessons import LessonStore
 from .llm import LLMError
 from .models import Branch, FeedbackItem, RunResult, Stage, gen_id
 from .record import Record
@@ -54,6 +55,7 @@ class Orchestrator:
         workspace: Workspace,
         sandbox: Sandbox,
         run_store: RunStore | None = None,
+        lesson_store: LessonStore | None = None,
         config: OrchestratorConfig | None = None,
     ):
         self.registry = registry
@@ -63,6 +65,9 @@ class Orchestrator:
         self.workspace = workspace
         self.sandbox = sandbox
         self.run_store = run_store
+        # Optional self-learning store. None => retrieval/injection are no-ops (the default),
+        # so behavior is byte-for-byte unchanged when self-learning is off.
+        self.lesson_store = lesson_store
         self.config = config or OrchestratorConfig()
         # Merge strategy: local git merge by default; a PullRequestMerger turns merges into
         # CI-gated GitHub PRs (never touches local main directly).
@@ -77,6 +82,24 @@ class Orchestrator:
         if cap is not None and self.treasury.spent_on(run_id) + cost > cap:
             return False
         return True
+
+    # --- self-learning (retrieval + injection) --------------------------
+    def _lessons_for(self, run_id, rec, *, stage, scope, discipline, query, injected,
+                     k: int = 3) -> list[str] | None:
+        """Deterministically fetch top-k advisory lessons for an official; record which were
+        injected (so a later merge can credit them) and return their guidance. No-op (None)
+        when self-learning is off or nothing relevant is found — keeps the call site uniform."""
+        if self.lesson_store is None:
+            return None
+        hits = self.lesson_store.retrieve(query, scope=scope, discipline=discipline, k=k)
+        if not hits:
+            return None
+        ids = [h.id for h in hits]
+        self.lesson_store.mark_used(ids)
+        injected.update(ids)
+        rec(stage, "procedure", "lessons_injected", scope=scope,
+            discipline=discipline, lesson_ids=ids)
+        return [h.guidance for h in hits]
 
     def _deploy(self, command: str, ws, rec) -> None:
         cwd = ws.deploy_dir() if hasattr(ws, "deploy_dir") else getattr(ws, "path", ".")
@@ -103,6 +126,7 @@ class Orchestrator:
         prd = diff = test_result = verdict = None
         merge_commit = None
         attempt = 0
+        injected_ids: set[str] = set()   # self-learning: lessons fed into this run (credited on merge)
 
         def result(outcome: Stage, last_stage: Stage, reason: str = "") -> RunResult:
             res = RunResult(
@@ -144,13 +168,18 @@ class Orchestrator:
                     self.treasury.debit(f"{a.branch.value}:{a.role}", cfg.spawn_cost,
                                         "spawn", run_id)
 
+            # Self-learning: architect precedents depend only on the feedback (no PRD yet).
+            arch_lessons = self._lessons_for(
+                run_id, rec, stage=Stage.SPEC, scope="architect", discipline=None,
+                query=feedback.text, injected=injected_ids)
+
             # --- SPEC (legislative): one architect, or a panel that proposes + votes ---
             if cfg.num_architects <= 1:
                 if not self._afford(architect.cost, run_id):
                     return result(Stage.ESCALATE, Stage.SPEC,
                                   "budget_exhausted: cannot fund SPEC")
                 try:
-                    prd = architect.write_prd(feedback, cwd=str(ws.path))
+                    prd = architect.write_prd(feedback, cwd=str(ws.path), lessons=arch_lessons)
                 except LLMError as e:
                     return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
                 self.treasury.debit("legislative:architect", architect.last_cost,
@@ -173,7 +202,7 @@ class Orchestrator:
                             return result(Stage.ESCALATE, Stage.SPEC,
                                           "budget_exhausted: cannot fund proposals")
                         try:
-                            p = m.write_prd(feedback, cwd=str(ws.path))
+                            p = m.write_prd(feedback, cwd=str(ws.path), lessons=arch_lessons)
                         except LLMError as e:
                             return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
                         self.treasury.debit("legislative:architect", m.last_cost,
@@ -238,7 +267,7 @@ class Orchestrator:
                         try:
                             prd = architect.write_prd(feedback, prior=prd,
                                                       review_feedback=ruling.feedback,
-                                                      cwd=str(ws.path))
+                                                      cwd=str(ws.path), lessons=arch_lessons)
                         except LLMError as e:
                             return result(Stage.ESCALATE, Stage.CONSTITUTIONAL, f"llm_error: {e}")
                         self.treasury.debit("legislative:architect", architect.last_cost,
@@ -255,6 +284,17 @@ class Orchestrator:
             rec(Stage.IMPLEMENT, "procedure", "hire", role=dev.role,
                 discipline=prd.discipline or "generalist", instance=dev.instance_id)
 
+            # Self-learning: dev + reviewer precedents now that the PRD names the discipline.
+            # Fetched ONCE (not per revision) to bound cost/noise; the same advisory list rides
+            # every attempt and every review of this run.
+            lesson_query = f"{feedback.text} {prd.title}"
+            dev_lessons = self._lessons_for(
+                run_id, rec, stage=Stage.IMPLEMENT, scope="dev", discipline=prd.discipline,
+                query=lesson_query, injected=injected_ids)
+            rev_lessons = self._lessons_for(
+                run_id, rec, stage=Stage.REVIEW, scope="reviewer", discipline=prd.discipline,
+                query=lesson_query, injected=injected_ids)
+
             # --- IMPLEMENT → VERIFY → REVIEW (bounded revise loop) ---
             while True:
                 # IMPLEMENT (executive)
@@ -269,6 +309,7 @@ class Orchestrator:
                         review_feedback=(verdict.feedback if verdict else ""),
                         directives=feedback.directives,
                         workspace=ws,
+                        lessons=dev_lessons,
                     )
                 except LLMError as e:
                     # Charge any spend that already happened (e.g. a completed plan pass) before
@@ -297,7 +338,7 @@ class Orchestrator:
                     # Hand over the post-change working tree (the feature branch with the diff
                     # applied); a grounded reviewer reads it to verify, a plain one ignores it.
                     verdict = reviewer.review(prd, diff, test_result, self.constitution,
-                                              cwd=str(ws.path))
+                                              cwd=str(ws.path), lessons=rev_lessons)
                 except LLMError as e:
                     ws.discard()  # the per-run worktree, not self.workspace (parallel-safe)
                     return result(Stage.ESCALATE, Stage.REVIEW, f"llm_error: {e}")
@@ -326,6 +367,10 @@ class Orchestrator:
                     # recorded but never un-does the merge that already landed.
                     if cfg.deploy_command:
                         self._deploy(cfg.deploy_command, ws, rec)
+                    # Self-learning: a merge credits every lesson injected into this run
+                    # (the 'wins' numerator for measuring whether precedents actually help).
+                    if self.lesson_store is not None and injected_ids:
+                        self.lesson_store.mark_won(list(injected_ids))
                     rec(Stage.DONE, "procedure", "done", commit=merge_commit)
                     return result(Stage.DONE, Stage.DONE, "merged")
 

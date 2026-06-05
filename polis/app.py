@@ -14,11 +14,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .constitution import Constitution, DEFAULT_PATH
 from .feedback import FeedbackInbox
+from .lessons import LessonStore, classify_run
 from .llm import ClaudeCliBackend, LLMBackend
-from .models import RunResult, Stage, gen_id
+from .models import Branch, RunResult, Stage, gen_id
 from .orchestrator import Orchestrator, OrchestratorConfig
 from .projectcfg import (resolve_dev_timeout, resolve_grounded_agents, resolve_main_branch,
                          resolve_merge_via_pr, resolve_model_tier_overrides,
+                         resolve_self_learning, resolve_self_learning_sample_good,
                          resolve_testing_mode, resolve_workspace)
 from .record import Record
 from .registry import ModelTier, Registry
@@ -41,6 +43,10 @@ class Government:
     run_store: RunStore
     inbox: FeedbackInbox
     orchestrator: Orchestrator
+    # Self-learning (default off => the whole loop is inert). lesson_store is shared with the
+    # orchestrator (retrieval side); _reflect (write side) lives here, post-run.
+    lesson_store: LessonStore | None = None
+    sample_good: bool = False
 
     def run_next(self):
         """Take the next pending feedback item through the procedure. Returns the
@@ -50,7 +56,50 @@ class Government:
             return None
         result = self.orchestrator.process(item)
         self.inbox.mark_processed(item.id, result.run_id)
+        self._reflect(result, item)
         return result
+
+    def _reflect(self, result, item) -> None:
+        """Self-learning post-mortem. After a run returns, distill + store ONE transferable
+        lesson when the outcome is learnable. Toggle-gated, budget-gated, and strictly
+        POST-run (the merge already landed inside ``process``), so it can never block or undo a
+        merge. Defensive: a reflection failure is recorded, never raised into the run loop."""
+        store = self.lesson_store
+        if store is None or result is None:
+            return
+        decision = classify_run(result, sample_good=self.sample_good)
+        if not decision.reflect:
+            return
+        reflector = self.registry.spawn("reflector")
+        try:
+            if not self.orchestrator._afford(reflector.cost, result.run_id):
+                self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
+                                   kind="reflect_skipped", source=Branch.PROCEDURE,
+                                   reason="budget_exhausted")
+                return
+            lesson = reflector.reflect(
+                prd_markdown=result.prd.to_markdown() if result.prd else "",
+                verdict_feedback=result.verdict.feedback if result.verdict else "",
+                test_summary=result.test_result.summary if result.test_result else "",
+                outcome=result.outcome.value, reason=result.reason, attempts=result.attempts,
+                polarity=decision.polarity, scope=decision.scope,
+                discipline=result.prd.discipline if result.prd else None,
+            )
+            self.treasury.debit("procedure:reflector", reflector.last_cost, "reflect",
+                                result.run_id)
+            lesson.run_id = result.run_id
+            if lesson.guidance.strip():   # an unparseable distillation yields no usable lesson
+                store.add(lesson)
+                self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
+                                   kind="reflect", source=Branch.PROCEDURE,
+                                   cost=reflector.last_cost, lesson_id=lesson.id,
+                                   scope=lesson.scope, polarity=lesson.polarity,
+                                   discipline=lesson.discipline)
+        except Exception as e:   # never let a post-run reflection break the run loop
+            self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
+                               kind="reflect_failed", source=Branch.PROCEDURE, reason=str(e)[:200])
+        finally:
+            self.registry.release(reflector)
 
     def run_parallel(self, items, max_workers: int = 4) -> list[RunResult]:
         """Run feedback items concurrently, each on its own git worktree. Shared state
@@ -90,12 +139,18 @@ class Government:
                 out[it.id] = fut.result()
         for it in items:  # mark processed on the main thread (inbox isn't shared)
             self.inbox.mark_processed(it.id, out[it.id].run_id)
+        # Reflect sequentially on the main thread AFTER the batch joins (worktrees gone): no
+        # store-write races, and a slow reflection never delays a merge that already landed.
+        for it in items:
+            self._reflect(out[it.id], it)
         return [out[it.id] for it in items]
 
     def close(self) -> None:
         """Close the SQLite-backed stores. Important on Windows, where unclosed
         handles can block deleting temp workspaces."""
-        for store in (self.treasury, self.run_store, self.inbox):
+        for store in (self.treasury, self.run_store, self.inbox, self.lesson_store):
+            if store is None:
+                continue
             try:
                 store.close()
             except Exception:
@@ -130,6 +185,14 @@ def build_government(
         registry = Registry.default()
     run_store = RunStore(base / "runs.sqlite")
     inbox = FeedbackInbox(base / "feedback.sqlite")
+    # Self-learning store (opt-in). When off, lesson_store stays None and the whole loop is
+    # inert: no retrieval/injection in the orchestrator, no post-run reflection — behavior is
+    # unchanged and no lessons.* files are created.
+    lesson_store = None
+    sample_good = False
+    if resolve_self_learning(base):
+        lesson_store = LessonStore(base / "lessons.sqlite", jsonl_path=base / "lessons.jsonl")
+        sample_good = resolve_self_learning_sample_good(base)
     if workspace is None:
         ws_path = resolve_workspace(base, workspace_dir)   # override > config > default
         # Don't silently git-init a user's existing non-git directory (footgun).
@@ -154,11 +217,12 @@ def build_government(
         config.merger = PullRequestMerger(main_branch=resolve_main_branch(base))
     orchestrator = Orchestrator(
         registry=registry, treasury=treasury, record=record, constitution=constitution,
-        workspace=workspace, sandbox=sandbox, run_store=run_store,
+        workspace=workspace, sandbox=sandbox, run_store=run_store, lesson_store=lesson_store,
         config=config,
     )
     return Government(
         base=base, treasury=treasury, record=record, constitution=constitution,
         registry=registry, workspace=workspace, sandbox=sandbox, run_store=run_store,
-        inbox=inbox, orchestrator=orchestrator,
+        inbox=inbox, orchestrator=orchestrator, lesson_store=lesson_store,
+        sample_good=sample_good,
     )

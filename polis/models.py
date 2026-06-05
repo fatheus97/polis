@@ -156,6 +156,30 @@ class RunResult:
         return self.outcome == Stage.DONE
 
 
+@dataclass
+class Lesson:
+    """A distilled, transferable lesson from a finished run — the system's *case-law*.
+
+    The Reflector ("Archivist") writes one after an eligible run; the orchestrator
+    retrieves the relevant ones (lexical FTS5 over ``trigger``/``guidance``) and injects
+    them as ADVISORY guidance into future agent prompts. The hard gates (tests-green +
+    constitution scan) still override, so a bad lesson can never merge bad code.
+    """
+
+    trigger: str                       # the situation this lesson applies to (FTS-indexed)
+    guidance: str                      # the transferable advice (FTS-indexed)
+    scope: str = "dev"                 # architect | dev | reviewer — which official it informs
+    discipline: str | None = None      # e.g. "backend"; None = generalist / any discipline
+    polarity: str = "pitfall"          # pitfall | good_practice
+    source_reason: str = ""            # the RunResult.reason that produced it
+    run_id: str = ""
+    id: str = field(default_factory=lambda: gen_id("lesson"))
+    created_at: float = field(default_factory=time.time)
+    uses: int = 0                      # times injected into a later run (lift measurement / decay)
+    wins: int = 0                      # times injected into a later MERGED run (confidence)
+    status: str = "active"             # active | retired | deleted
+
+
 def to_jsonable(obj):
     """Best-effort conversion of our dataclasses/enums to JSON-serializable data."""
     if isinstance(obj, Enum):

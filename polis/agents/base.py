@@ -8,7 +8,7 @@ not just by convention.
 
 from __future__ import annotations
 
-from ..models import Branch, Diff, FeedbackItem, PRD, TestResult, Verdict
+from ..models import Branch, Diff, FeedbackItem, Lesson, PRD, TestResult, Verdict
 
 
 class Agent:
@@ -41,9 +41,11 @@ class Architect(Agent):
         prior: PRD | None = None,
         review_feedback: str = "",
         cwd: str | None = None,
+        lessons: list[str] | None = None,
     ) -> PRD:  # pragma: no cover - interface
         # `cwd` (when set) is the repository; a grounded architect Reads it + the tester
         # screenshot to write a code-grounded PRD. Plain architects ignore it.
+        # `lessons` (when set) are advisory precedents from past runs (self-learning).
         raise NotImplementedError
 
     def vote(self, proposals: list[PRD]) -> int:
@@ -61,7 +63,9 @@ class Dev(Agent):
         review_feedback: str = "",
         directives: dict | None = None,
         workspace=None,
+        lessons: list[str] | None = None,
     ) -> Diff:  # pragma: no cover - interface
+        # `lessons` (when set) are advisory precedents from past runs (self-learning).
         raise NotImplementedError
 
 
@@ -79,9 +83,11 @@ class Reviewer(Agent):
         test_result: TestResult,
         constitution,
         cwd: str | None = None,
+        lessons: list[str] | None = None,
     ) -> Verdict:  # pragma: no cover - interface
         # `cwd` (when set) is the post-change repository; a grounded reviewer may Read/Grep it
         # to verify criteria a diff cannot show. Plain reviewers ignore it.
+        # `lessons` (when set) are advisory precedents from past runs (self-learning).
         raise NotImplementedError
 
 
@@ -91,4 +97,30 @@ class ConstitutionalJudge(Agent):
     """
 
     def review_prd(self, prd: PRD, constitution) -> Verdict:  # pragma: no cover
+        raise NotImplementedError
+
+
+class Reflector(Agent):
+    """Procedural archivist: distills ONE transferable :class:`Lesson` from a finished run.
+
+    Reads ONLY the run's artifacts (PRD text, the final verdict feedback, the test summary,
+    the terminal outcome/reason/attempts) — never the live architect/dev/reviewer and never
+    the repo — so branch independence holds. Classification (polarity/scope/discipline) is
+    decided deterministically by the procedure and passed IN; the model only writes the
+    ``trigger`` + ``guidance``, keeping policy out of the prompt.
+    """
+
+    def reflect(
+        self,
+        *,
+        prd_markdown: str,
+        verdict_feedback: str,
+        test_summary: str,
+        outcome: str,
+        reason: str,
+        attempts: int,
+        polarity: str,
+        scope: str,
+        discipline: str | None,
+    ) -> Lesson:  # pragma: no cover - interface
         raise NotImplementedError

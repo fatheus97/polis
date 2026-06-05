@@ -102,6 +102,20 @@ def resolve_grounded_agents(base) -> bool:
     return bool(read_config(base).get("grounded_agents", False))
 
 
+def resolve_self_learning(base) -> bool:
+    """When on, Polis reflects on each eligible finished run, distills ONE transferable
+    lesson (stored in SQLite FTS5), and injects relevant past lessons into future agent
+    prompts (experiential self-learning / "case law"). One extra `claude` call per eligible
+    run (~$0.10+), budget-gated and POST-run, so it never blocks a merge. Default off."""
+    return bool(read_config(base).get("self_learning", False))
+
+
+def resolve_self_learning_sample_good(base) -> bool:
+    """When on (and self_learning is on), clean first-attempt merges also yield a
+    'good_practice' lesson, not just failures/reworked merges. Adds cost + noise. Default off."""
+    return bool(read_config(base).get("self_learning_sample_good", False))
+
+
 def resolve_dev_timeout(base) -> int:
     """Seconds the agentic dev (Claude Code) may run per attempt before timing out (default 900).
     The architect keeps the backend's shorter default; a grounded reviewer uses its own 600s

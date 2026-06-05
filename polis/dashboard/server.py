@@ -187,6 +187,11 @@ def create_app(base) -> FastAPI:
     def feedback():
         return {"pending": reader.read_pending_feedback(base)}
 
+    @app.get("/api/lessons")
+    def lessons(include_retired: bool = False):
+        # Self-learning "case law" panel. Empty when self-learning has never run.
+        return {"lessons": reader.read_lessons_rows(base, include_retired=include_retired)}
+
     # --- tester feedback reports ---
     @app.get("/api/reports")
     def reports():
@@ -284,6 +289,27 @@ def create_app(base) -> FastAPI:
         if "error" in res:
             raise HTTPException(404 if "not found" in res["error"] else 400, res["error"])
         return res
+
+    @app.post("/api/lessons/{lesson_id}/{action}")
+    def curate_lesson(lesson_id: str, action: str):
+        # Human curation of self-learning lessons: promote/retire/delete (the anti-poison knob,
+        # alongside the deterministic decay pass). Writes to lessons.sqlite directly — short-lived
+        # and rare, so cross-process SQLite locking is sufficient.
+        status = {"promote": "active", "retire": "retired", "delete": "deleted"}.get(action)
+        if status is None:
+            raise HTTPException(400, f"unknown action: {action!r}")
+        path = base / "lessons.sqlite"
+        if not path.exists():
+            raise HTTPException(404, "no lessons yet")
+        from ..lessons import LessonStore
+        store = LessonStore(path, jsonl_path=base / "lessons.jsonl")
+        try:
+            if store.get(lesson_id) is None:
+                raise HTTPException(404, "lesson not found")
+            store.set_status(lesson_id, status)
+        finally:
+            store.close()
+        return {"lesson_id": lesson_id, "status": status}
 
     @app.post("/api/config")
     def set_config(body: ConfigIn):

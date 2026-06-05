@@ -11,8 +11,8 @@ drive specific scenarios (a leaked secret, a flaky implementation, etc.):
 
 from __future__ import annotations
 
-from ..models import Branch, Diff, FeedbackItem, FileChange, PRD, TestResult, Verdict
-from .base import Architect, ConstitutionalJudge, Dev, Reviewer
+from ..models import Branch, Diff, FeedbackItem, FileChange, Lesson, PRD, TestResult, Verdict
+from .base import Architect, ConstitutionalJudge, Dev, Reflector, Reviewer
 
 def _test_src(module: str) -> str:
     return (
@@ -30,7 +30,8 @@ class StubArchitect(Architect):
     def __init__(self, cost: float = 20.0):
         super().__init__("architect", Branch.LEGISLATIVE, cost)
 
-    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback="", cwd=None):
+    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback="", cwd=None,
+                  lessons=None):
         if prior is not None:
             # Revision: keep the same law, bump the rev, fold in the court's feedback.
             prior.revision += 1
@@ -67,7 +68,8 @@ class StubDev(Dev):
         super().__init__("dev", Branch.EXECUTIVE, cost)
         self.specialty = specialty
 
-    def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
+    def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None,
+                  lessons=None):
         directives = directives or {}
         mode = directives.get("dev", "ok")
         fail_n = int(directives.get("n", 0)) if mode == "fail_n_times" else 0
@@ -98,7 +100,7 @@ class StubReviewer(Reviewer):
     def __init__(self, cost: float = 20.0):
         super().__init__("reviewer", Branch.JUDICIAL, cost)
 
-    def review(self, prd, diff, test_result, constitution, cwd=None):
+    def review(self, prd, diff, test_result, constitution, cwd=None, lessons=None):
         violations = constitution.check_diff(diff)
         blocking = [v for v in violations if v.severity == "block"]
         reasons: list[str] = []
@@ -141,3 +143,19 @@ class StubConstitutionalJudge(ConstitutionalJudge):
                 feedback=f"Revise the PRD so it no longer requires: {ids}.",
             )
         return Verdict(approved=True, reasons=["PRD is constitutional."])
+
+
+class StubReflector(Reflector):
+    """Deterministic lesson: echoes the outcome + the reviewer's parting feedback, so the
+    self-learning loop can be exercised end-to-end without a model."""
+
+    def __init__(self, cost: float = 5.0):
+        super().__init__("reflector", Branch.PROCEDURE, cost)
+
+    def reflect(self, *, prd_markdown, verdict_feedback, test_summary, outcome, reason,
+                attempts, polarity, scope, discipline):
+        return Lesson(
+            trigger=f"{outcome.lower()} run: {reason[:120]}",
+            guidance=(verdict_feedback or reason or "no actionable guidance")[:200],
+            scope=scope, discipline=discipline, polarity=polarity, source_reason=reason,
+        )

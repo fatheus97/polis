@@ -7,7 +7,8 @@ from pathlib import Path
 
 from polis.dashboard import reader
 from polis.feedback import FeedbackInbox
-from polis.models import FeedbackItem, RunResult, Stage
+from polis.lessons import LessonStore
+from polis.models import FeedbackItem, Lesson, RunResult, Stage
 from polis.record import Record
 from polis.state import RunStore
 from polis.treasury import Treasury
@@ -80,6 +81,19 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(reader.read_treasury_snapshot(empty)["balance"], 0.0)
         self.assertEqual(reader.read_runstore_rows(empty), [])
         self.assertEqual(reader.read_pending_feedback(empty), [])
+        self.assertEqual(reader.read_lessons_rows(empty), [])  # no lessons.sqlite yet
+
+    def test_lessons_rows(self):
+        store = LessonStore(self.base / "lessons.sqlite", jsonl_path=self.base / "lessons.jsonl")
+        store.add(Lesson(trigger="health endpoint", guidance="add a test",
+                         scope="dev", polarity="pitfall", uses=2, wins=1))
+        store.add(Lesson(trigger="retired one", guidance="x", scope="dev", status="retired"))
+        store.close()
+        active = reader.read_lessons_rows(self.base)
+        self.assertEqual(len(active), 1)                       # retired excluded by default
+        self.assertEqual(active[0]["guidance"], "add a test")
+        self.assertEqual((active[0]["uses"], active[0]["wins"]), (2, 1))
+        self.assertEqual(len(reader.read_lessons_rows(self.base, include_retired=True)), 2)
 
 
 if __name__ == "__main__":
