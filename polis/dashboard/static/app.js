@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { selected: null, detailRunId: null, lastFeedTs: 0, openReport: null, reportsCache: [], pendingIds: new Set() };
+const state = { selected: null, detailRunId: null, lastFeedTs: 0, openReport: null, reportsCache: [], pendingIds: new Set(), branchLoadSeq: 0 };
 
 async function api(method, path, body) {
   const opt = { method, headers: { "Content-Type": "application/json" } };
@@ -272,10 +272,13 @@ $("runForm").onsubmit = async (e) => {
 
 async function loadBranches(path) {
   const sel = $("repoBranchSelect");
+  const seq = ++state.branchLoadSeq;
   sel.innerHTML = '<option value="">— branch —</option>';
   if (!path) return;
   try {
     const { branches } = await api("GET", `/api/branches?path=${encodeURIComponent(path)}`);
+    if (seq !== state.branchLoadSeq) return;
+    sel.innerHTML = '<option value="">— branch —</option>';
     branches.forEach((b) => {
       const opt = document.createElement("option");
       opt.value = b; opt.textContent = b;
@@ -317,7 +320,6 @@ async function applyRepo(path, branch) {
   $("repoMsg").innerHTML = "";
   toast("Target repo set.");
   loadConfig();
-  loadBranches(path);
 }
 
 function showRepoNeedsInit(path) {
