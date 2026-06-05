@@ -26,12 +26,17 @@
         <header>Control panel</header>
         <div class="repo">
           <div class="muted" id="repoCurrent">target repo: …</div>
-          <form id="repoForm" class="row">
-            <input id="repoPath" hidden placeholder="path to the repo Polis develops" />
+          <div class="row">
             <button type="button" id="browsePath" class="secondary">Browse…</button>
-            <select id="repoBranchSelect" style="max-width:7rem" title="select branch">
+            <select id="repoBranchSelect" style="max-width:8rem" title="select branch">
               <option value="">— branch —</option>
             </select>
+          </div>
+          <!-- inline error + git-init offer; hidden until a non-git folder is chosen -->
+          <div id="repoMsg" class="repo-msg" hidden></div>
+          <!-- fallback only: revealed when no OS picker is available (204) -->
+          <form id="repoForm" class="row" hidden>
+            <input id="repoPath" hidden placeholder="path to the repo Polis develops" />
             <button type="submit" class="secondary">Set repo</button>
           </form>
         </div>
