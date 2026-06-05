@@ -251,7 +251,19 @@ class DashboardServerTest(unittest.TestCase):
         self.assertTrue(r.headers["content-type"].startswith("text/css"))
         css = r.text
         self.assertIn(".row > input", css)
-        self.assertRegex(css, r"\.row\s*>\s*input\s*\{[^}]*flex:\s*1")
+        self.assertRegex(css, r"\.row\s*>\s*input[^{]*\{[^}]*flex:\s*1")
+
+    def test_architects_label_is_spelled_out_in_full(self):
+        html = self.client.get("/").text
+        self.assertIn(">Architects", html)
+        self.assertIn('id="runArchitects"', html)
+        self.assertNotIn(">arch", html)
+
+    def test_styles_css_equalizes_row_children_height(self):
+        css = self.client.get("/static/styles.css").text
+        self.assertIn(".row > input, .row > select, .row > button", css)
+        self.assertRegex(css, r"\.row\s*>\s*input[^{]*button[^{]*\{[^}]*box-sizing:\s*border-box")
+        self.assertRegex(css, r"\.row\s*>\s*input[^{]*button[^{]*\{[^}]*height:")
 
     def test_static_served_from_startup_snapshot_immune_to_disk_edits(self):
         # THE FIX: a self-dev run rewrites app.js/index.html in the working tree mid-run; the

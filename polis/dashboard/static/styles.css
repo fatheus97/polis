@@ -72,8 +72,9 @@ body { margin: 0; }
 .feed .f .k { min-width: 5.5rem; }
 
 /* forms */
-.row { display: flex; gap: .5rem; align-items: center; }
-.row > input { flex: 1; margin: 0; min-width: 0; }
+.row { display: flex; gap: .5rem; align-items: stretch; }
+.row > input, .row > select, .row > button { box-sizing: border-box; height: 2.25rem; margin: 0; }
+.row > input, .row > select { flex: 1; min-width: 0; }
 .run-row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
 .run-row input[type=number] { width: 4rem; margin: 0; padding: .2rem .3rem; }
 .chk { margin: 0; font-size: .85rem; display: inline-flex; gap: .25rem; align-items: center; }
