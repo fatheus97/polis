@@ -162,6 +162,11 @@ class LessonStore:
                  lesson.uses, lesson.wins, lesson.status),
             )
             if self._fts:
+                # The content INSERT above is OR REPLACE; the FTS mirror isn't kept in sync
+                # automatically, so delete any prior FTS row for this id before re-inserting —
+                # otherwise re-adding the same lesson_id leaves a ghost row and retrieval would
+                # return it twice. (External-content FTS would avoid this, but this stays simple.)
+                self.conn.execute("DELETE FROM lessons_fts WHERE lesson_id=?", (lesson.id,))
                 self.conn.execute(
                     "INSERT INTO lessons_fts (trigger, guidance, discipline, lesson_id) "
                     "VALUES (?,?,?,?)",
@@ -278,31 +283,33 @@ class LessonStore:
         return [r for _, _, r in scored[:k]], cols
 
     def get(self, lesson_id: str) -> Lesson | None:
-        cur = self.conn.execute("SELECT * FROM lessons WHERE lesson_id=?", (lesson_id,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        return _lesson_from_row(dict(zip([c[0] for c in cur.description], row)))
+        with self._lock:    # one connection shared across threads — serialize every access
+            cur = self.conn.execute("SELECT * FROM lessons WHERE lesson_id=?", (lesson_id,))
+            row = cur.fetchone()
+            cols = [c[0] for c in cur.description]
+        return _lesson_from_row(dict(zip(cols, row))) if row else None
 
     def all(self, *, include_retired: bool = False) -> list[Lesson]:
         sql = "SELECT * FROM lessons"
         if not include_retired:
             sql += " WHERE status='active'"
         sql += " ORDER BY created_at DESC"
-        cur = self.conn.execute(sql)
-        cols = [c[0] for c in cur.description]
-        return [_lesson_from_row(dict(zip(cols, r))) for r in cur.fetchall()]
+        with self._lock:
+            cur = self.conn.execute(sql)
+            cols = [c[0] for c in cur.description]
+            rows = cur.fetchall()
+        return [_lesson_from_row(dict(zip(cols, r))) for r in rows]
 
     def stats(self) -> dict:
         """Counts + aggregate usage, for the ``lessons`` CLI / dashboard panel."""
-        cur = self.conn.execute(
-            "SELECT scope, polarity, status, COUNT(*), COALESCE(SUM(uses),0), "
-            "COALESCE(SUM(wins),0) FROM lessons GROUP BY scope, polarity, status")
-        by = [{"scope": s, "polarity": p, "status": st, "count": c, "uses": u, "wins": w}
-              for (s, p, st, c, u, w) in cur.fetchall()]
-        (total, active, uses, wins) = self.conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(status='active'),0), COALESCE(SUM(uses),0), "
-            "COALESCE(SUM(wins),0) FROM lessons").fetchone()
+        with self._lock:
+            by = [{"scope": s, "polarity": p, "status": st, "count": c, "uses": u, "wins": w}
+                  for (s, p, st, c, u, w) in self.conn.execute(
+                      "SELECT scope, polarity, status, COUNT(*), COALESCE(SUM(uses),0), "
+                      "COALESCE(SUM(wins),0) FROM lessons GROUP BY scope, polarity, status")]
+            (total, active, uses, wins) = self.conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(status='active'),0), COALESCE(SUM(uses),0), "
+                "COALESCE(SUM(wins),0) FROM lessons").fetchone()
         return {"total": total, "active": active, "uses": uses, "wins": wins, "groups": by}
 
     def close(self) -> None:

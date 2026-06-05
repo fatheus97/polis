@@ -111,7 +111,7 @@ REFLECTOR_SYSTEM = (
 def _lessons_block(lessons: list[str]) -> str:
     """Render retrieved precedents as an advisory prompt section (self-learning)."""
     return ("\nLESSONS from past runs (advisory — apply if relevant, ignore if not):\n"
-            + "\n".join(f"- {l}" for l in lessons))
+            + "\n".join(f"- {item}" for item in lessons))
 
 
 def _render_diff(diff: Diff, per_file: int = 20000, total: int = 80000) -> str:

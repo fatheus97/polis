@@ -72,7 +72,10 @@ class Government:
             return
         reflector = self.registry.spawn("reflector")
         try:
-            if not self.orchestrator._afford(reflector.cost, result.run_id):
+            # Gate on the GLOBAL treasury only — NOT the per-task cap. Reflection is post-run
+            # learning bookkeeping, not part of the run's implementation cost, so a run that hit
+            # its per_task_cap should still get to reflect when the treasury has funds.
+            if not self.treasury.can_afford(reflector.cost):
                 self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
                                    kind="reflect_skipped", source=Branch.PROCEDURE,
                                    reason="budget_exhausted")
@@ -88,13 +91,19 @@ class Government:
             self.treasury.debit("procedure:reflector", reflector.last_cost, "reflect",
                                 result.run_id)
             lesson.run_id = result.run_id
-            if lesson.guidance.strip():   # an unparseable distillation yields no usable lesson
+            if lesson.guidance.strip():
                 store.add(lesson)
                 self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
                                    kind="reflect", source=Branch.PROCEDURE,
                                    cost=reflector.last_cost, lesson_id=lesson.id,
                                    scope=lesson.scope, polarity=lesson.polarity,
                                    discipline=lesson.discipline)
+            else:
+                # The call ran (and cost real money) but produced no usable guidance — record it
+                # so the audit trail distinguishes "garbage output" from "skipped, no budget".
+                self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
+                                   kind="reflect_empty", source=Branch.PROCEDURE,
+                                   cost=reflector.last_cost, reason=result.reason[:120])
         except Exception as e:   # never let a post-run reflection break the run loop
             self.record.append(run_id=result.run_id, stage=result.outcome, actor="procedure",
                                kind="reflect_failed", source=Branch.PROCEDURE, reason=str(e)[:200])

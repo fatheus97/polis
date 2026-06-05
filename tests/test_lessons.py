@@ -8,6 +8,7 @@ import threading
 import unittest
 from pathlib import Path
 
+from polis.agents.base import Reflector
 from polis.agents.llm_agents import ClaudeCodeDev, LLMArchitect, LLMReflector, LLMReviewer
 from polis.agents.stubs import StubReflector
 from polis.app import Government
@@ -15,7 +16,8 @@ from polis.constitution import Constitution
 from polis.feedback import FeedbackInbox
 from polis.lessons import LessonStore, ReflectDecision, classify_run
 from polis.llm import FakeLLM
-from polis.models import Diff, FeedbackItem, FileChange, Lesson, PRD, RunResult, Stage
+from polis.models import Branch, Diff, FeedbackItem, FileChange, Lesson, PRD, RunResult, Stage
+from polis.registry import RoleTemplate
 from tests._doubles import Harness, ScriptedSandbox, failing, passing
 
 
@@ -31,10 +33,10 @@ def rr(reason, *, outcome=Stage.ESCALATE, attempts=0) -> RunResult:
 
 
 def make_gov(*, lesson_store=None, sandbox=None, budget=1000.0, sample_good=False,
-             max_revisions=2):
+             max_revisions=2, per_task_cap=None):
     """A Government wired from the hermetic doubles, so we can drive run_next + _reflect."""
     h = Harness(sandbox=sandbox, lesson_store=lesson_store, budget=budget,
-                max_revisions=max_revisions)
+                max_revisions=max_revisions, per_task_cap=per_task_cap)
     inbox = FeedbackInbox(":memory:")
     gov = Government(
         base=h.tmp, treasury=h.treasury, record=h.record, constitution=h.constitution,
@@ -53,6 +55,16 @@ class LessonStoreTest(unittest.TestCase):
         hits = s.retrieve("socket tests flaky", scope="dev")
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0].guidance, "use temp dirs")
+
+    def test_readd_same_id_does_not_duplicate_in_fts(self):
+        # Regression: INSERT OR REPLACE on the content table must not leave a ghost FTS row,
+        # or retrieval would return the same lesson twice.
+        s = LessonStore(":memory:")
+        s.add(L(trigger="socket flaky", guidance="v1", id="lesson-fixed"))
+        s.add(L(trigger="socket flaky", guidance="v2 updated", id="lesson-fixed"))
+        hits = s.retrieve("socket flaky", scope="dev")
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].guidance, "v2 updated")
 
     def test_scope_filter_excludes_other_scope(self):
         s = LessonStore(":memory:")
@@ -309,6 +321,50 @@ class HookTest(unittest.TestCase):
         self.assertEqual(res.outcome, Stage.ESCALATE)
         self.assertTrue(res.reason.startswith("revisions_exhausted"))
         self.assertIn("reflect_skipped", h.kinds())
+        self.assertNotIn("reflect", h.kinds())
+        self.assertEqual(store.all(), [])
+
+    def test_uses_not_counted_when_run_escalates_before_agent(self):
+        # A run that escalates at the SPEC budget gate (before the architect runs) must NOT
+        # bump `uses` — retrieval is a pure read; usage is counted only on real consumption.
+        store = LessonStore(":memory:")
+        seeded = L(trigger="health endpoint", guidance="add a test", scope="architect")
+        store.add(seeded)
+        gov, h, inbox = make_gov(lesson_store=store, budget=5)   # < architect cost (20)
+        inbox.submit("add a health endpoint")
+        res = gov.run_next()
+        self.assertEqual(res.last_stage, Stage.SPEC)
+        self.assertEqual(store.get(seeded.id).uses, 0)
+        self.assertNotIn("lessons_injected", h.kinds())
+
+    def test_reflection_ignores_per_task_cap(self):
+        # per_task_cap bounds the RUN's spend; reflection is post-run bookkeeping and gates on
+        # the global treasury, so a run that exhausts its cap can still produce a lesson.
+        store = LessonStore(":memory:")
+        gov, h, inbox = make_gov(lesson_store=store, sandbox=ScriptedSandbox([failing()]),
+                                 budget=1000, per_task_cap=110)   # run spends exactly 110
+        inbox.submit("add a health endpoint")
+        res = gov.run_next()
+        self.assertTrue(res.reason.startswith("revisions_exhausted"))
+        self.assertIn("reflect", h.kinds())     # OLD code would have emitted reflect_skipped
+        self.assertEqual(len(store.all()), 1)
+
+    def test_empty_distillation_records_reflect_empty(self):
+        # The reflector ran (and cost money) but produced no usable guidance: record it so the
+        # audit trail distinguishes "garbage output" from "skipped, no budget".
+        class _EmptyReflector(Reflector):
+            def __init__(self):
+                super().__init__("reflector", Branch.PROCEDURE, 5.0)
+
+            def reflect(self, *, scope, polarity, **_):
+                return Lesson(trigger="t", guidance="   ", scope=scope, polarity=polarity)
+
+        store = LessonStore(":memory:")
+        gov, h, inbox = make_gov(lesson_store=store, sandbox=ScriptedSandbox([failing()]))
+        h.registry.register(RoleTemplate("reflector", Branch.PROCEDURE, _EmptyReflector))
+        inbox.submit("add a health endpoint")
+        gov.run_next()
+        self.assertIn("reflect_empty", h.kinds())
         self.assertNotIn("reflect", h.kinds())
         self.assertEqual(store.all(), [])
 

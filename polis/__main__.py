@@ -250,11 +250,12 @@ def main(argv=None) -> int:
             lessons = store.all(include_retired=args.all_lessons)
             if not lessons:
                 print("No lessons yet.")
-            for l in lessons:
-                print(f"{l.id}  {l.scope:9} {l.polarity:12} {l.discipline or '-':9} "
-                      f"uses={l.uses} wins={l.wins} [{l.status}]")
-                print(f"    trigger : {l.trigger}")
-                print(f"    guidance: {l.guidance}")
+            for lesson in lessons:
+                print(f"{lesson.id}  {lesson.scope:9} {lesson.polarity:12} "
+                      f"{lesson.discipline or '-':9} uses={lesson.uses} wins={lesson.wins} "
+                      f"[{lesson.status}]")
+                print(f"    trigger : {lesson.trigger}")
+                print(f"    guidance: {lesson.guidance}")
             return 0
         finally:
             store.close()

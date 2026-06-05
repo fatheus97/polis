@@ -84,22 +84,30 @@ class Orchestrator:
         return True
 
     # --- self-learning (retrieval + injection) --------------------------
-    def _lessons_for(self, run_id, rec, *, stage, scope, discipline, query, injected,
-                     k: int = 3) -> list[str] | None:
-        """Deterministically fetch top-k advisory lessons for an official; record which were
-        injected (so a later merge can credit them) and return their guidance. No-op (None)
-        when self-learning is off or nothing relevant is found — keeps the call site uniform."""
+    def _retrieve_lessons(self, *, scope, discipline, query, k: int = 3):
+        """PURE read: top-k advisory lessons as ``(guidance_list, ids)``. No side effects —
+        usage is only counted once an agent actually consumes them (see ``_note_injected``),
+        so a run that escalates at a budget gate before the agent runs doesn't inflate the
+        ``uses`` denominator that the decay/lift logic depends on."""
         if self.lesson_store is None:
-            return None
+            return None, []
         hits = self.lesson_store.retrieve(query, scope=scope, discipline=discipline, k=k)
         if not hits:
-            return None
-        ids = [h.id for h in hits]
-        self.lesson_store.mark_used(ids)
-        injected.update(ids)
+            return None, []
+        return [h.guidance for h in hits], [h.id for h in hits]
+
+    def _note_injected(self, ids, rec, *, stage, scope, discipline, injected) -> None:
+        """Record that these lessons ACTUALLY reached an agent: bump ``uses`` (the lift
+        denominator), remember them for a merge credit, and emit the audit event. Idempotent
+        per run via the ``injected`` set, so the dev/reviewer revise loop counts one use, not
+        one-per-attempt."""
+        fresh = [i for i in ids if i not in injected]
+        if not fresh:
+            return
+        self.lesson_store.mark_used(fresh)
+        injected.update(fresh)
         rec(stage, "procedure", "lessons_injected", scope=scope,
-            discipline=discipline, lesson_ids=ids)
-        return [h.guidance for h in hits]
+            discipline=discipline, lesson_ids=fresh)
 
     def _deploy(self, command: str, ws, rec) -> None:
         cwd = ws.deploy_dir() if hasattr(ws, "deploy_dir") else getattr(ws, "path", ".")
@@ -169,9 +177,9 @@ class Orchestrator:
                                         "spawn", run_id)
 
             # Self-learning: architect precedents depend only on the feedback (no PRD yet).
-            arch_lessons = self._lessons_for(
-                run_id, rec, stage=Stage.SPEC, scope="architect", discipline=None,
-                query=feedback.text, injected=injected_ids)
+            # Retrieval is a pure read here; usage is counted only once the architect runs.
+            arch_lessons, arch_ids = self._retrieve_lessons(
+                scope="architect", discipline=None, query=feedback.text)
 
             # --- SPEC (legislative): one architect, or a panel that proposes + votes ---
             if cfg.num_architects <= 1:
@@ -184,6 +192,8 @@ class Orchestrator:
                     return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
                 self.treasury.debit("legislative:architect", architect.last_cost,
                                     "write_prd", run_id)
+                self._note_injected(arch_ids, rec, stage=Stage.SPEC, scope="architect",
+                                    discipline=None, injected=injected_ids)
                 rec(Stage.SPEC, "legislative:architect", "prd", cost=architect.last_cost,
                     prd_id=prd.id, title=prd.title, revision=prd.revision)
             else:
@@ -207,6 +217,9 @@ class Orchestrator:
                             return result(Stage.ESCALATE, Stage.SPEC, f"llm_error: {e}")
                         self.treasury.debit("legislative:architect", m.last_cost,
                                             "propose", run_id)
+                        # Count the architect lessons used once a panel member actually ran.
+                        self._note_injected(arch_ids, rec, stage=Stage.SPEC, scope="architect",
+                                            discipline=None, injected=injected_ids)
                         proposals.append(p)
                         rec(Stage.SPEC, "legislative:architect", "proposal",
                             cost=m.last_cost, index=i, prd_id=p.id, title=p.title)
@@ -285,15 +298,13 @@ class Orchestrator:
                 discipline=prd.discipline or "generalist", instance=dev.instance_id)
 
             # Self-learning: dev + reviewer precedents now that the PRD names the discipline.
-            # Fetched ONCE (not per revision) to bound cost/noise; the same advisory list rides
-            # every attempt and every review of this run.
+            # Fetched ONCE (pure read; not per revision) to bound cost/noise; the same advisory
+            # list rides every attempt/review. Usage is counted only when each agent first runs.
             lesson_query = f"{feedback.text} {prd.title}"
-            dev_lessons = self._lessons_for(
-                run_id, rec, stage=Stage.IMPLEMENT, scope="dev", discipline=prd.discipline,
-                query=lesson_query, injected=injected_ids)
-            rev_lessons = self._lessons_for(
-                run_id, rec, stage=Stage.REVIEW, scope="reviewer", discipline=prd.discipline,
-                query=lesson_query, injected=injected_ids)
+            dev_lessons, dev_ids = self._retrieve_lessons(
+                scope="dev", discipline=prd.discipline, query=lesson_query)
+            rev_lessons, rev_ids = self._retrieve_lessons(
+                scope="reviewer", discipline=prd.discipline, query=lesson_query)
 
             # --- IMPLEMENT → VERIFY → REVIEW (bounded revise loop) ---
             while True:
@@ -320,6 +331,8 @@ class Orchestrator:
                     return result(Stage.ESCALATE, Stage.IMPLEMENT, f"llm_error: {e}")
                 ws.apply(diff)
                 self.treasury.debit("executive:dev", dev.last_cost, "implement", run_id)
+                self._note_injected(dev_ids, rec, stage=Stage.IMPLEMENT, scope="dev",
+                                    discipline=prd.discipline, injected=injected_ids)
                 rec(Stage.IMPLEMENT, "executive:dev", "diff", cost=dev.last_cost, attempt=attempt,
                     branch=branch, files=[c.path for c in diff.changes], summary=diff.summary)
 
@@ -343,6 +356,8 @@ class Orchestrator:
                     ws.discard()  # the per-run worktree, not self.workspace (parallel-safe)
                     return result(Stage.ESCALATE, Stage.REVIEW, f"llm_error: {e}")
                 self.treasury.debit("judicial:reviewer", reviewer.last_cost, "review", run_id)
+                self._note_injected(rev_ids, rec, stage=Stage.REVIEW, scope="reviewer",
+                                    discipline=prd.discipline, injected=injected_ids)
                 rec(Stage.REVIEW, "judicial:reviewer", "verdict", cost=reviewer.last_cost,
                     source=Branch.PROCEDURE, approved=verdict.approved,
                     reasons=verdict.reasons,
@@ -369,6 +384,9 @@ class Orchestrator:
                         self._deploy(cfg.deploy_command, ws, rec)
                     # Self-learning: a merge credits every lesson injected into this run
                     # (the 'wins' numerator for measuring whether precedents actually help).
+                    # KNOWN SIMPLIFICATION: architect/dev/reviewer wins are pooled, so an
+                    # architect lesson shares credit with a dev success in the same run. We
+                    # accept this — per-scope attribution isn't worth the bookkeeping yet.
                     if self.lesson_store is not None and injected_ids:
                         self.lesson_store.mark_won(list(injected_ids))
                     rec(Stage.DONE, "procedure", "done", commit=merge_commit)
