@@ -58,6 +58,8 @@ py -m polis dashboard --no-browser               # web control panel (needs the 
 py -m polis config --repo <path>                 # set the target repo Polis develops (else <base>/workspace)
 py -m polis config --testing-mode on             # inject the tester feedback widget (Clerk + reports)
 py -m polis config --merge-via-pr on             # land changes via a CI-gated GitHub PR, not a local merge
+py -m polis config --self-learning on            # distil a lesson per run + inject past lessons (case law)
+py -m polis lessons [--stats|--decay|--retire ID] # inspect/curate self-learning lessons
 ```
 
 ## Code standards

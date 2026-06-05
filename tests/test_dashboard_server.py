@@ -54,6 +54,25 @@ class DashboardServerTest(unittest.TestCase):
         pend = self.client.get("/api/feedback").json()["pending"]
         self.assertEqual([p["text"] for p in pend], ["do x"])
 
+    def test_lessons_empty_then_listed_and_curated(self):
+        from polis.lessons import LessonStore
+        from polis.models import Lesson
+        self.assertEqual(self.client.get("/api/lessons").json()["lessons"], [])  # none yet
+        store = LessonStore(self.base / "lessons.sqlite", jsonl_path=self.base / "lessons.jsonl")
+        store.add(Lesson(trigger="health endpoint", guidance="add a test",
+                         scope="dev", polarity="pitfall", id="lesson-deadbeef"))
+        store.close()
+        self.assertEqual([l["lesson_id"] for l in self.client.get("/api/lessons").json()["lessons"]],
+                         ["lesson-deadbeef"])
+        # curate: retire hides it from the active list, include_retired still shows it
+        r = self.client.post("/api/lessons/lesson-deadbeef/retire")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.get("/api/lessons").json()["lessons"], [])
+        self.assertEqual(len(self.client.get("/api/lessons?include_retired=true").json()["lessons"]), 1)
+        # error paths
+        self.assertEqual(self.client.post("/api/lessons/nope/retire").status_code, 404)
+        self.assertEqual(self.client.post("/api/lessons/lesson-deadbeef/bogus").status_code, 400)
+
     def test_real_runs_config_default_on_and_toggles(self):
         # Real-vs-stub is a config switch (default on), not a UI/request field.
         self.assertTrue(self.client.get("/api/config").json()["real_runs"])

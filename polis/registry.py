@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .agents.base import Agent
-from .agents.stubs import StubArchitect, StubConstitutionalJudge, StubDev, StubReviewer
+from .agents.stubs import (StubArchitect, StubConstitutionalJudge, StubDev, StubReflector,
+                           StubReviewer)
 from .models import Branch, gen_id
 
 
@@ -111,6 +112,8 @@ class Registry:
                                   "Judges diffs against PRD + constitution."))
         reg.register(RoleTemplate("constitutional-judge", Branch.JUDICIAL,
                                   StubConstitutionalJudge, "Reviews PRDs for constitutionality."))
+        reg.register(RoleTemplate("reflector", Branch.PROCEDURE, StubReflector,
+                                  "Distills a finished run into a transferable lesson."))
         reg._dev_factory = lambda discipline: StubDev(specialty=discipline)
         return reg
 
@@ -120,7 +123,7 @@ class Registry:
              grounded: bool = False) -> "Registry":
         """The Phase-1 government: real, model-backed officials sharing one backend."""
         from .agents.llm_agents import (ClaudeCodeDev, LLMArchitect,
-                                        LLMConstitutionalJudge, LLMReviewer)
+                                        LLMConstitutionalJudge, LLMReflector, LLMReviewer)
         tier = tier or ModelTier()
         reg = cls()
         reg.register(RoleTemplate("architect", Branch.LEGISLATIVE,
@@ -140,6 +143,9 @@ class Registry:
         reg.register(RoleTemplate("constitutional-judge", Branch.JUDICIAL,
                                   lambda: LLMConstitutionalJudge(backend, tier.reviewer),
                                   "LLM court: reviews PRDs for constitutionality."))
+        reg.register(RoleTemplate("reflector", Branch.PROCEDURE,
+                                  lambda: LLMReflector(backend, tier.reviewer),
+                                  "LLM archivist: finished run -> a transferable lesson."))
 
         def _hire(discipline):
             if discipline:

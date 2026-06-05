@@ -89,6 +89,7 @@ dashboard the moment a self-dev change merges, so the new code *and* UI just app
 | `config --restart-on-merge on` | auto-restarts the dashboard after a self-dev merge so changes show |
 | `config --grounded-agents on` | agents read the real repo (+ screenshot) instead of working blind — costs more, but verifies against reality |
 | `config --dev-plan-model opus` | the dev plans with Opus (read-only) then executes with `dev_model` — best quality, priciest (drop to economize) |
+| `config --self-learning on` | after each finished run, distil one transferable lesson and inject relevant past lessons into future prompts (experiential "case law" — ~$0.10+/run, post-run so it never blocks a merge); inspect/curate with `lessons` |
 | `budget --appropriate 20` | funds the treasury; real runs draw from it (leave `auto_run` off) |
 
 Everything below is **background** — how it works, the build phases, the full CLI. For day-to-day use,
@@ -178,6 +179,12 @@ py -m polis --base .polis-real run --real --architects 3 --constitution-court
 
 # Phase 3: many PRDs at once on isolated worktrees, with a decorrelated reviewer
 py -m polis --base .polis-real run --real --parallel 4 --decorrelate
+
+# Phase 6: self-learning — distil a lesson per finished run, inject relevant ones into future runs
+py -m polis --base .polis-real config --self-learning on
+py -m polis --base .polis-real lessons             # list distilled lessons (case law)
+py -m polis --base .polis-real lessons --stats      # counts + usage/win (lift) totals
+py -m polis --base .polis-real lessons --decay      # auto-retire well-used, low-win lessons
 ```
 
 ### The dashboard & feedback loop (background)
@@ -213,6 +220,11 @@ authenticated + CI on the target repo — a clone of this repo has both.
 - **Phase 5** ✅ — opt-in **PR-based merge** (`config --merge-via-pr on`): Polis lands changes
   by pushing a branch and opening a CI-gated GitHub PR (push → wait for required checks →
   squash-merge), never touching local `main` directly — so it works like a careful contributor.
+- **Phase 6** ✅ — opt-in **self-learning** (`config --self-learning on`): after each finished run a
+  procedural *Reflector* distils one transferable lesson (the ExpeL/Reflexion pattern); the
+  orchestrator stores it (SQLite FTS5 — stdlib, no embeddings) and injects relevant lessons into
+  future Architect/Dev/Reviewer prompts as advisory "case law". Hard gates still override, so a bad
+  lesson can't merge bad code; `lessons --stats` measures lift and `--decay`/`--retire` curate.
 
 ## License
 

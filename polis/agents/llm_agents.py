@@ -16,8 +16,8 @@ import warnings
 from pathlib import Path
 
 from ..llm import LLMBackend, LLMError, extract_json
-from ..models import Branch, Diff, PRD, Verdict
-from .base import Architect, ConstitutionalJudge, Dev, Reviewer
+from ..models import Branch, Diff, Lesson, PRD, Verdict
+from .base import Architect, ConstitutionalJudge, Dev, Reflector, Reviewer
 
 # Architect/reviewer must not mutate anything — they reason over text only.
 READONLY_ARGS = ["--disallowedTools", "Edit", "Write", "Bash", "NotebookEdit", "MultiEdit"]
@@ -97,6 +97,22 @@ CONSTITUTIONAL_SYSTEM = (
     "concrete guidance for the architect if rejecting). No prose."
 )
 
+REFLECTOR_SYSTEM = (
+    "You are the Archivist of an autonomous software team — you write CASE LAW. Given the "
+    "record of a single FINISHED run (its spec, the final reviewer feedback, the test "
+    "result, and the terminal outcome), distill ONE short, TRANSFERABLE lesson that a "
+    "FUTURE run on a DIFFERENT task should remember — a concrete rule of thumb, NOT a "
+    "restatement of this run's facts and NO run ids or file-specific names. Output ONLY a "
+    "JSON object: {\"trigger\": <one sentence naming the situation the lesson applies to>, "
+    "\"guidance\": <one or two sentences of actionable advice>}. No prose."
+)
+
+
+def _lessons_block(lessons: list[str]) -> str:
+    """Render retrieved precedents as an advisory prompt section (self-learning)."""
+    return ("\nLESSONS from past runs (advisory — apply if relevant, ignore if not):\n"
+            + "\n".join(f"- {item}" for item in lessons))
+
 
 def _render_diff(diff: Diff, per_file: int = 20000, total: int = 80000) -> str:
     # The reviewer must actually SEE the code to verify it — a 1500-char/file cap made it
@@ -133,8 +149,11 @@ class LLMArchitect(Architect):
         self.grounded = grounded
         self.timeout = timeout
 
-    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback="", cwd=None):
+    def write_prd(self, feedback, repo_summary="", prior=None, review_feedback="", cwd=None,
+                  lessons=None):
         parts = [f"Tester feedback:\n{feedback.text}"]
+        if lessons:
+            parts.append(_lessons_block(lessons))
         if repo_summary:
             parts.append(f"\nRepository summary:\n{repo_summary}")
         if prior is not None:
@@ -235,7 +254,8 @@ class ClaudeCodeDev(Dev):
         )
         return (resp.text or ""), resp.cost_usd
 
-    def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None):
+    def implement(self, prd, attempt=0, review_feedback="", directives=None, workspace=None,
+                  lessons=None):
         if workspace is None:
             raise ValueError("ClaudeCodeDev requires a workspace to edit")
         system = DEV_SYSTEM
@@ -244,6 +264,8 @@ class ClaudeCodeDev(Dev):
         if self.testing_mode:
             system += WIDGET_INSTRUCTION
         parts = [f"Implement this PRD in the current repository:\n\n{prd.to_markdown()}"]
+        if lessons:
+            parts.append(_lessons_block(lessons))
         if review_feedback:
             parts.append(f"\nThe previous attempt was REJECTED. Address this feedback:\n"
                          f"{review_feedback}")
@@ -290,7 +312,7 @@ class LLMReviewer(Reviewer):
         self.grounded = grounded
         self.timeout = timeout
 
-    def review(self, prd, diff, test_result, constitution, cwd=None):
+    def review(self, prd, diff, test_result, constitution, cwd=None, lessons=None):
         violations = constitution.check_diff(diff)
         blocking = [v for v in violations if v.severity == "block"]
 
@@ -298,6 +320,8 @@ class LLMReviewer(Reviewer):
             f"PRD:\n{prd.to_markdown()}",
             f"\nTest result: {'PASS' if test_result.passed else 'FAIL'} — {test_result.summary}",
         ]
+        if lessons:
+            parts.append(_lessons_block(lessons))
         if test_result.details:
             parts.append(f"\nTest output (tail):\n{test_result.details[-2000:]}")
         parts.append(f"\nChanged files:\n{_render_diff(diff)}")
@@ -376,3 +400,40 @@ class LLMConstitutionalJudge(ConstitutionalJudge):
         if not approved and not feedback:
             feedback = "; ".join(reasons)
         return Verdict(approved=approved, reasons=reasons, feedback=feedback)
+
+
+class LLMReflector(Reflector):
+    """Distills a finished run into one transferable Lesson (self-learning). Read-only,
+    text-only — it never touches the repo or the live agents."""
+
+    def __init__(self, backend: LLMBackend, model: str = "sonnet",
+                 cost_estimate: float = 0.40, timeout: int = 300):
+        super().__init__("reflector", Branch.PROCEDURE, cost_estimate)
+        self.backend = backend
+        self.model = model
+        self.timeout = timeout
+
+    def reflect(self, *, prd_markdown, verdict_feedback, test_summary, outcome, reason,
+                attempts, polarity, scope, discipline):
+        parts = [
+            f"Outcome: {outcome} ({reason}) after {attempts} attempt(s).",
+            f"\nSpec (PRD):\n{prd_markdown or '(none)'}",
+            f"\nFinal reviewer feedback:\n{verdict_feedback or '(none)'}",
+            f"\nTest result: {test_summary or '(none)'}",
+            f"\nFile this as a {polarity} lesson for the {scope}"
+            + (f" specializing in {discipline}." if discipline else "."),
+            "\nReturn the lesson as JSON now.",
+        ]
+        resp = self.backend.complete("\n".join(parts), system=REFLECTOR_SYSTEM,
+                                     model=self.model, extra_args=READONLY_ARGS,
+                                     timeout=self.timeout)
+        self.last_cost = resp.cost_usd
+        try:
+            d = extract_json(resp.text)
+            trigger = (d.get("trigger") or reason or "")[:500]
+            guidance = (d.get("guidance") or "")[:1000]
+        except LLMError:
+            # Degrade to an empty lesson; the orchestrator drops lessons with no guidance.
+            trigger, guidance = reason[:500], ""
+        return Lesson(trigger=trigger, guidance=guidance, scope=scope,
+                      discipline=discipline, polarity=polarity, source_reason=reason)

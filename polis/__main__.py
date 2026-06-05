@@ -93,6 +93,17 @@ def main(argv=None) -> int:
     sub.add_parser("runs", help="list completed runs")
     sub.add_parser("status", help="treasury + inbox + run summary")
 
+    pl = sub.add_parser("lessons", help="inspect/curate self-learning lessons (case law)")
+    pl.add_argument("--all", dest="all_lessons", action="store_true",
+                    help="include retired/deleted lessons in the listing")
+    pl.add_argument("--stats", action="store_true", help="show counts + usage/win totals")
+    pl.add_argument("--retire", metavar="ID", default=None,
+                    help="demote a lesson so it stops being injected")
+    pl.add_argument("--promote", metavar="ID", default=None, help="reactivate a retired lesson")
+    pl.add_argument("--delete", metavar="ID", default=None, help="hide a lesson permanently")
+    pl.add_argument("--decay", action="store_true",
+                    help="auto-retire well-used lessons with a low merge-win rate (anti-poison)")
+
     pd = sub.add_parser("dashboard",
                         help="serve the web control panel (needs the 'dashboard' extra)")
     pd.add_argument("--host", default="127.0.0.1")
@@ -118,6 +129,10 @@ def main(argv=None) -> int:
                       help="auto-restart the dashboard after it merges a change to its own checkout (self-dev)")
     pcfg.add_argument("--grounded-agents", choices=["on", "off"], default=None,
                       help="agents read the real repo (+ screenshot) instead of working blind (costs more)")
+    pcfg.add_argument("--self-learning", choices=["on", "off"], default=None,
+                      help="reflect on finished runs and inject past lessons into future prompts (~$0.10+/run)")
+    pcfg.add_argument("--self-learning-sample-good", choices=["on", "off"], default=None,
+                      help="also learn 'good practice' from clean first-attempt merges (more cost/noise)")
     pcfg.add_argument("--intake-url", default=None,
                       help="absolute intake URL baked into the served widget (for external apps)")
     pcfg.add_argument("--intake-origins", default=None,
@@ -152,6 +167,7 @@ def main(argv=None) -> int:
                                  resolve_grounded_agents, resolve_main_branch,
                                  resolve_merge_via_pr, resolve_model_tier_overrides,
                                  resolve_real_runs, resolve_restart_on_merge,
+                                 resolve_self_learning, resolve_self_learning_sample_good,
                                  resolve_testing_mode, resolve_ticketizer, resolve_workspace,
                                  write_config)
         updates = {}
@@ -164,7 +180,9 @@ def main(argv=None) -> int:
                           ("ticketizer", args.ticketizer), ("real_runs", args.real_runs),
                           ("merge_via_pr", args.merge_via_pr),
                           ("restart_on_merge", args.restart_on_merge),
-                          ("grounded_agents", args.grounded_agents)):
+                          ("grounded_agents", args.grounded_agents),
+                          ("self_learning", args.self_learning),
+                          ("self_learning_sample_good", args.self_learning_sample_good)):
             if val is not None:
                 updates[flag] = (val == "on")
         if args.intake_url is not None:
@@ -189,11 +207,58 @@ def main(argv=None) -> int:
               f"real_runs : {resolve_real_runs(args.base)}   "
               f"merge_via_pr : {resolve_merge_via_pr(args.base)}   "
               f"restart_on_merge : {resolve_restart_on_merge(args.base)}   "
-              f"grounded_agents : {resolve_grounded_agents(args.base)}")
+              f"grounded_agents : {resolve_grounded_agents(args.base)}   "
+              f"self_learning : {resolve_self_learning(args.base)}"
+              + ("  (sample_good)" if resolve_self_learning_sample_good(args.base) else ""))
         t = ModelTier(**resolve_model_tier_overrides(args.base))
         print(f"models       : architect={t.architect}  dev={t.dev}  reviewer={t.reviewer}"
               f"  dev_plan={t.dev_plan_model}   dev_timeout={resolve_dev_timeout(args.base)}s")
         return 0
+
+    if args.cmd == "lessons":
+        # Read/curate the lesson store directly — no full Government (no git-init side effect).
+        from .lessons import LessonStore
+        from .projectcfg import resolve_self_learning
+        path = Path(args.base) / "lessons.sqlite"
+        if not path.exists():
+            print("No lessons yet." if resolve_self_learning(args.base)
+                  else "Self-learning is off (enable with: config --self-learning on).")
+            return 0
+        store = LessonStore(path, jsonl_path=Path(args.base) / "lessons.jsonl")
+        try:
+            for lesson_id, status in (("retire", "retired"), ("promote", "active"),
+                                      ("delete", "deleted")):
+                target = getattr(args, lesson_id)
+                if target:
+                    store.set_status(target, status)
+                    print(f"{lesson_id.capitalize()}d {target}.")
+            if args.retire or args.promote or args.delete:
+                return 0
+            if args.decay:
+                retired = store.decay()
+                print(f"Retired {len(retired)} low-win lesson(s)." if retired
+                      else "Nothing to retire.")
+                return 0
+            if args.stats:
+                s = store.stats()
+                print(f"Lessons: {s['active']} active / {s['total']} total  "
+                      f"(uses={s['uses']}, wins={s['wins']})")
+                for g in s["groups"]:
+                    print(f"  {g['scope']:9} {g['polarity']:12} {g['status']:8} "
+                          f"count={g['count']} uses={g['uses']} wins={g['wins']}")
+                return 0
+            lessons = store.all(include_retired=args.all_lessons)
+            if not lessons:
+                print("No lessons yet.")
+            for lesson in lessons:
+                print(f"{lesson.id}  {lesson.scope:9} {lesson.polarity:12} "
+                      f"{lesson.discipline or '-':9} uses={lesson.uses} wins={lesson.wins} "
+                      f"[{lesson.status}]")
+                print(f"    trigger : {lesson.trigger}")
+                print(f"    guidance: {lesson.guidance}")
+            return 0
+        finally:
+            store.close()
 
     config = None
     build_kwargs = {}

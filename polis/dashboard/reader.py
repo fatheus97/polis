@@ -80,6 +80,26 @@ def read_runstore_rows(base) -> list[dict]:
         conn.close()
 
 
+def read_lessons_rows(base, *, include_retired: bool = False) -> list[dict]:
+    """Self-learning lessons for the dashboard panel (read-only). Empty when self-learning
+    has never run (no lessons.sqlite). Each row carries uses/wins so the UI can show lift."""
+    conn = open_ro_sqlite(Path(base) / "lessons.sqlite")
+    if conn is None:
+        return []
+    try:
+        sql = "SELECT * FROM lessons"
+        if not include_retired:
+            sql += " WHERE status='active'"
+        sql += " ORDER BY created_at DESC"
+        cur = conn.execute(sql)
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+
 def read_pending_feedback(base) -> list[dict]:
     conn = open_ro_sqlite(Path(base) / "feedback.sqlite")
     if conn is None:

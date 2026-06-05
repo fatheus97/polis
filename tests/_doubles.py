@@ -100,7 +100,7 @@ class Harness:
     def __init__(self, *, budget=1000.0, sandbox=None, workspace=None,
                  max_revisions=2, per_task_cap=None, spawn_cost=0.0,
                  constitutional_review=False, max_prd_revisions=1, num_architects=1,
-                 merger=None):
+                 merger=None, lesson_store=None):
         self.tmp = Path(tempfile.mkdtemp(prefix="polis-test-"))
         self.treasury = Treasury(":memory:")
         if budget:
@@ -109,12 +109,13 @@ class Harness:
         self.constitution = Constitution.load()
         self.registry = Registry.default()
         self.run_store = RunStore(":memory:")
+        self.lesson_store = lesson_store
         self.workspace = workspace or FakeWorkspace()
         self.sandbox = sandbox or ScriptedSandbox([passing()])
         self.orch = Orchestrator(
             registry=self.registry, treasury=self.treasury, record=self.record,
             constitution=self.constitution, workspace=self.workspace, sandbox=self.sandbox,
-            run_store=self.run_store,
+            run_store=self.run_store, lesson_store=lesson_store,
             config=OrchestratorConfig(max_revisions=max_revisions,
                                       per_task_cap=per_task_cap, spawn_cost=spawn_cost,
                                       constitutional_review=constitutional_review,
