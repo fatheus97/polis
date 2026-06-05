@@ -329,11 +329,21 @@ $("browsePath").onclick = async () => {
     const r = await fetch("/api/browse", { method: "POST" });
     if (r.status === 200) {
       const { path } = await r.json();
+      $("repoPath").hidden = false;
       $("repoPath").value = path;
       await loadBranches(path);
+      toast(`Selected: ${path}`);
+    } else {
+      // 204: no picker available — reveal the text field as fallback
+      $("repoPath").hidden = false;
+      $("repoPath").focus();
+      toast("No folder picker available — type the repo path here.");
     }
-    // 204 means no dialog available — text field stays editable as fallback
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    $("repoPath").hidden = false;
+    $("repoPath").focus();
+    toast("Couldn't open the picker — type the repo path here.");
+  }
 };
 
 $("repoPath").onblur = () => { const p = $("repoPath").value.trim(); if (p) loadBranches(p); };
