@@ -38,7 +38,7 @@ jobs:
       # Pinned by SHA to v1.0.112 (a known-good release): the floating `v1` tag
       # was advanced to a build whose native installer is broken
       # (anthropics/claude-code-action#1254). Bump once that is resolved upstream.
-      - uses: anthropics/claude-code-action@2cc1ac1331eac7a6a96d716dd204dd2888d0fcd2
+      - uses: anthropics/claude-code-action@593d7a5c4e0073569f74772c2b7b64c30ec14707
         if: steps.gate.outputs.enabled == 'true'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
